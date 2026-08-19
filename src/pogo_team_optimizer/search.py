@@ -7,8 +7,9 @@ from collections.abc import Sequence
 
 from pogo_team_optimizer.models import RankingEntry
 from pogo_team_optimizer.scoring import (
-    DEFAULT_WEIGHTS,
+    BASELINE_CONFIG,
     ScoreWeights,
+    ScoringConfig,
     TeamScoreBreakdown,
     resistance_types,
     score_team,
@@ -31,7 +32,9 @@ def candidate_team_count(candidate_count: int) -> int:
 
 
 def rank_teams(
-    entries: Sequence[RankingEntry], weights: ScoreWeights = DEFAULT_WEIGHTS
+    entries: Sequence[RankingEntry],
+    weights: ScoreWeights | None = None,
+    scoring_config: ScoringConfig = BASELINE_CONFIG,
 ) -> list[TeamEvaluation]:
     """Enumerate every unordered team and sort with stable deterministic ties."""
     evaluations: list[TeamEvaluation] = []
@@ -40,7 +43,7 @@ def rank_teams(
         evaluations.append(
             TeamEvaluation(
                 members=team,
-                score=score_team(team, weights),
+                score=score_team(team, weights, scoring_config),
                 shared_weaknesses=tuple(
                     (attacking_type.value, count)
                     for attacking_type, count in shared_weaknesses(team)

@@ -49,6 +49,35 @@ class OptimizeCliTests(unittest.TestCase):
             self.assertIn("ranking_quality", rows[0])
             self.assertIn("shared_weaknesses", rows[0])
 
+    def test_cli_selects_experimental_scoring_variant(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output_path = Path(directory) / "combined.csv"
+            stdout = io.StringIO()
+
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "--league",
+                        "great",
+                        "--top",
+                        "6",
+                        "--input",
+                        str(FIXTURE),
+                        "--output",
+                        str(output_path),
+                        "--scoring",
+                        "combined",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(output_path.is_file())
+            self.assertIn("scoring=combined", stdout.getvalue())
+
+    def test_cli_rejects_invalid_scoring_variant(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            main(["--scoring", "make-it-look-right"])
+
     def test_cli_requires_at_least_three_candidates(self) -> None:
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             main(["--top", "2"])

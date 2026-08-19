@@ -13,3 +13,4 @@ build/
 # 原始排名資料與產出結果不納入版本控制。
 data/*/*.csv
 results/*/*.csv
+results/*/*.json

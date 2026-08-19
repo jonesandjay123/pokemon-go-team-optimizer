@@ -5,6 +5,13 @@ from statistics import fmean
 from typing import Final
 
 from pogo_team_optimizer.models import RankingEntry
+from pogo_team_optimizer.scoring.config import (
+    BASELINE_CONFIG,
+    ResistanceCoverageStrategy,
+    ScoreWeights,
+    ScoringConfig,
+    TeammateCoverageStrategy,
+)
 from pogo_team_optimizer.type_chart import (
     NEUTRAL,
     SUPER_EFFECTIVE,
@@ -15,21 +22,6 @@ from pogo_team_optimizer.type_chart import (
 
 TEAM_SIZE: Final = 3
 TYPE_COUNT: Final = len(PokemonType)
-
-
-@dataclass(frozen=True, slots=True)
-class ScoreWeights:
-    """Tunable V1 weights; all raw components are normalized to 0..1."""
-
-    ranking_quality: float = 35.0
-    resistance_coverage: float = 25.0
-    teammate_weakness_coverage: float = 25.0
-    defensive_diversity: float = 15.0
-    shared_weakness_penalty: float = 20.0
-    severe_weakness_penalty: float = 15.0
-
-
-DEFAULT_WEIGHTS: Final = ScoreWeights()
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,8 +62,46 @@ def resistance_types(team: tuple[RankingEntry, ...]) -> tuple[PokemonType, ...]:
     )
 
 
+def transform_resistance_coverage(
+    raw_coverage: float, strategy: ResistanceCoverageStrategy, exponent: float
+) -> float:
+    """Apply a monotonic coverage transform configured for the experiment."""
+    if not 0 <= raw_coverage <= 1:
+        raise ValueError("raw_coverage must be between 0 and 1")
+    if strategy is ResistanceCoverageStrategy.LINEAR:
+        return raw_coverage
+    if strategy is ResistanceCoverageStrategy.DIMINISHING:
+        return raw_coverage**exponent
+    raise ValueError(f"unsupported resistance strategy: {strategy}")
+
+
+def exposure_aware_type_coverage(
+    vulnerable_members: int, resistant_members: int
+) -> float:
+    """Score resistance supply relative to vulnerability for one attack type.
+
+    The resistant share among non-neutral responses is normalized by 2/3, the
+    maximum possible share when a three-member team has at least one weakness.
+    Representative patterns therefore score as follows:
+    weak/neutral/resist = 0.75, weak/weak/resist = 0.50,
+    weak/resist/resist = 1.00, and weak/weak/neutral = 0.00.
+    """
+    if vulnerable_members < 0 or resistant_members < 0:
+        raise ValueError("member counts cannot be negative")
+    if vulnerable_members + resistant_members > TEAM_SIZE:
+        raise ValueError("member counts cannot exceed team size")
+    if vulnerable_members == 0:
+        return 1.0
+    if resistant_members == 0:
+        return 0.0
+    resistant_share = resistant_members / (vulnerable_members + resistant_members)
+    return min(1.0, resistant_share / (2 / TEAM_SIZE))
+
+
 def score_team(
-    team: tuple[RankingEntry, ...], weights: ScoreWeights = DEFAULT_WEIGHTS
+    team: tuple[RankingEntry, ...],
+    weights: ScoreWeights | None = None,
+    config: ScoringConfig = BASELINE_CONFIG,
 ) -> TeamScoreBreakdown:
     """Score one unordered three-member team.
 
@@ -86,6 +116,7 @@ def score_team(
     if len(team) != TEAM_SIZE:
         raise ValueError("V1 teams must contain exactly three Pokémon")
 
+    effective_weights = weights or config.weights
     matrix = defensive_multipliers(team)
     ranking_quality = min(1.0, max(0.0, fmean(member.score for member in team) / 100))
 
@@ -95,6 +126,7 @@ def score_team(
     resisted_type_count = 0
     weakness_exposures = 0
     covered_weakness_exposures = 0
+    exposure_aware_coverage_total = 0.0
     diversity_total = 0.0
 
     double_weakness_threshold = SUPER_EFFECTIVE**2 - 1e-9
@@ -106,6 +138,12 @@ def score_team(
             multiplier >= double_weakness_threshold for multiplier in multipliers
         )
         resisted_type_count += any(multiplier < NEUTRAL for multiplier in multipliers)
+        resistant_members = sum(multiplier < NEUTRAL for multiplier in multipliers)
+        if weak_members:
+            exposure_aware_coverage_total += (
+                weak_members
+                * exposure_aware_type_coverage(weak_members, resistant_members)
+            )
 
         for member_index, multiplier in enumerate(multipliers):
             if multiplier <= NEUTRAL:
@@ -133,21 +171,37 @@ def score_team(
             double_weakness_exposures / (TYPE_COUNT * TEAM_SIZE),
         )
     )
-    resistance_coverage = resisted_type_count / TYPE_COUNT
-    teammate_weakness_coverage = (
+    raw_resistance_coverage = resisted_type_count / TYPE_COUNT
+    resistance_coverage = transform_resistance_coverage(
+        raw_resistance_coverage,
+        config.resistance_strategy,
+        config.resistance_exponent,
+    )
+    binary_teammate_coverage = (
         covered_weakness_exposures / weakness_exposures
         if weakness_exposures
         else 1.0
     )
+    exposure_aware_coverage = (
+        exposure_aware_coverage_total / weakness_exposures
+        if weakness_exposures
+        else 1.0
+    )
+    teammate_weakness_coverage = (
+        binary_teammate_coverage
+        if config.teammate_strategy is TeammateCoverageStrategy.BINARY
+        else exposure_aware_coverage
+    )
     defensive_diversity = diversity_total / TYPE_COUNT
 
     total_score = (
-        weights.ranking_quality * ranking_quality
-        + weights.resistance_coverage * resistance_coverage
-        + weights.teammate_weakness_coverage * teammate_weakness_coverage
-        + weights.defensive_diversity * defensive_diversity
-        - weights.shared_weakness_penalty * shared_weakness_penalty
-        - weights.severe_weakness_penalty * severe_weakness_penalty
+        effective_weights.ranking_quality * ranking_quality
+        + effective_weights.resistance_coverage * resistance_coverage
+        + effective_weights.teammate_weakness_coverage
+        * teammate_weakness_coverage
+        + effective_weights.defensive_diversity * defensive_diversity
+        - effective_weights.shared_weakness_penalty * shared_weakness_penalty
+        - effective_weights.severe_weakness_penalty * severe_weakness_penalty
     )
     return TeamScoreBreakdown(
         total_score=total_score,

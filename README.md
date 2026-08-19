@@ -42,6 +42,7 @@ pokemon-go-team-optimizer/
 │   ├── type_chart.py               # 完整 18 屬性倍率
 │   ├── search.py                   # 三人組窮舉與排序
 │   ├── output.py                   # 結果 CSV 輸出
+│   ├── sensitivity.py              # V1.1 五模型比較與穩定度分析
 │   └── optimize.py                 # 最佳化流程入口
 └── tests/
     └── fixtures/                   # 可提交的小型壞 header 測試資料
@@ -164,9 +165,89 @@ total_score =
 
 相同輸入會使用成員原始 rank 與名稱作為 tie-break，確保每次輸出順序一致。
 
+## V1.1 評分敏感度實驗
+
+真實 Great League V1 結果的 Top 50 全部含有 Steel 與 Flying，而且 teammate coverage 全部達到 100%。V1.1 的目的不是調出「看起來合理」的隊伍，而是用固定、可重現的實驗判斷：這種結構究竟來自特定評分公式，還是純防守屬性最佳化本身就會導向相近答案。
+
+### Baseline 保證
+
+`baseline` 完整保留 V1 的公式、權重與 tie-break。以下兩個指令使用相同模型：
+
+```bash
+pogo-team-optimizer --league great --top 50
+pogo-team-optimizer --league great --top 50 --scoring baseline
+```
+
+V1.1 的 regression test 會固定檢查 baseline 結果；實驗變體不會覆寫或暗中調整 baseline。
+
+### 實驗變體
+
+#### `diminishing-resistance`
+
+將原始 resistance coverage `c`（抵抗屬性數除以 18）轉換為：
+
+```text
+transformed_resistance = c ^ exponent
+exponent = 0.5
+```
+
+平方根是單調且正規化的凹函數。早期 coverage 仍有價值，但從 16 → 17 → 18 的邊際差距會縮小。`exponent` 是 `ScoringConfig` 的顯式參數，不包含針對特定隊伍的例外。
+
+#### `exposure-aware`
+
+baseline 只要有一名隊友抵抗，就會把每個 weakness exposure 視為完整 cover。實驗模型改為對每種攻擊屬性計算：
+
+```text
+type_coverage = min(1, (resistant / (vulnerable + resistant)) / (2 / 3))
+team_coverage = 依 vulnerable 數加權的 type_coverage 平均
+```
+
+`2/3` 是三人隊伍在至少一名成員有弱點時，抵抗成員所能占的最大比例。代表性結果：
+
+- weak／neutral／resist：`0.75`
+- weak／weak／resist：`0.50`
+- weak／resist／resist：`1.00`
+- weak／weak／neutral：`0.00`
+
+因此兩名隊員同時有弱點、只有一人抵抗時，不再和單一弱點得到相同分數。
+
+#### `combined`
+
+同時使用平方根 resistance coverage 與 exposure-aware teammate coverage，其他公式與權重不變。
+
+#### `severe-penalty`
+
+只把 severe weakness penalty 權重從 baseline 的 `15` 提高為 `45`（固定 3 倍），其餘 coverage 邏輯不變。這個數值在執行實驗前即固定，不會依 Top 10 結果調整。
+
+### 執行單一模型
+
+```bash
+pogo-team-optimizer --league great --top 50 --scoring diminishing-resistance
+pogo-team-optimizer --league great --top 50 --scoring exposure-aware
+pogo-team-optimizer --league great --top 50 --scoring combined
+pogo-team-optimizer --league great --top 50 --scoring severe-penalty
+```
+
+baseline 維持輸出 `top_teams.csv`；實驗模型預設輸出 `top_teams_<scoring>.csv`。
+
+### 執行完整比較
+
+```bash
+pogo-team-optimizer --league great --top 50 --compare-scoring
+```
+
+比較流程會讓五個模型各自評估同一批 19,600 個 unordered teams，並在 `results/great_league/` 產生：
+
+- `top_teams_<scoring>.csv`：每個模型的 Top 50
+- `v1_1_comparison.csv`：五模型的結構與穩定度摘要
+- `v1_1_summary.json`：Top 10、個別／合併暗影頻率、coverage 分布、Jaccard、頻率變化與 ranking movement
+
+所有結果檔都由 `.gitignore` 排除。V1.1 模型只是敏感度實驗，**不代表真實勝率更高**，也沒有加入招式 coverage、傷害、能量、盾或戰鬥模擬。
+
 ## Roadmap
 
 - [x] V1：修正 PvPokeTW CSV 欄位、取前 N 名、建立屬性矩陣、窮舉三人組並輸出 Top teams
+- [x] V1.1：比較五種固定防守評分模型的敏感度、結構偏誤與 ranking stability
 - [ ] V2：把實際招式屬性與進攻 coverage 納入評分
 - [ ] V3：建立或匯入 Pokémon 之間的 matchup matrix
 - [ ] V4：以平均值、最差情境與變異程度衡量隊伍 robustness
