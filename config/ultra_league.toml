@@ -1,0 +1,4 @@
+slug = "ultra"
+display_name = "Ultra League"
+cp_cap = 2500
+rankings_url = "https://pvpoke.com/rankings/all/2500/overall/"

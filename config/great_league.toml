@@ -1,0 +1,4 @@
+slug = "great"
+display_name = "Great League"
+cp_cap = 1500
+rankings_url = "https://pvpoke.com/rankings/all/1500/overall/"
