@@ -66,7 +66,7 @@ class V2Tests(unittest.TestCase):
         self.assertEqual(len(owned[0].charged_moves), 1)
         self.assertEqual(owned[-1].species_id, "bulbasaur_shadow")
         self.assertIn(InventoryStatus.DIFFERENT_MOVES, {item.status for item in diagnostics})
-        self.assertEqual(len(rank_v2_teams(owned)), 4)
+        self.assertEqual(len(rank_v2_teams(owned)), 2)
 
 
 if __name__ == "__main__":

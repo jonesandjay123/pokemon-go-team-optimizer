@@ -146,6 +146,67 @@ my-001,Bulbasaur,,false,1498,Vine Whip,Seed Bomb,,only one charged move
 
 目前 coverage 只回答「招式屬性最多能打到何種倍率」，不考慮招式傷害、能量效率、出招節奏、盾、CMP、Lead／Safe Swap／Closer、TM 經濟、星塵糖果成本或 IV-specific matchup。同樣具有 coverage 的兩個招式不代表實戰價值相等，這些屬於後續 battle-simulation 里程碑。
 
+## V2.1：庫存正確性強化
+
+V2.1 不改寫 V1／V1.1／V2，而是在庫存模式補上兩項正確性保證：
+
+1. **GBL species clause**：同一圖鑑 species 不能同隊。合法性使用 GameMaster 的 `dex` 作 canonical key，因此兩個不同個體、Normal + Shadow，以及同圖鑑的其他 form 都不能同時進隊。理論與庫存搜尋使用同一規則。
+2. **實際 moveset 品質修正**：庫存實際招式仍完整參與 V2 coverage，並額外衡量快速招式 DPT、EPT、出招回應性，以及蓄力招式 power、energy、DPE、費用與 buff/debuff utility。
+
+Moveset quality 的公開公式為：
+
+```text
+fast_quality = 0.40 × normalized_DPT
+             + 0.50 × normalized_EPT
+             + 0.10 × timing_responsiveness
+
+charged_quality = 0.20 × normalized_power
+                + 0.55 × normalized_DPE
+                + 0.25 × affordability
+                + 0.10 × signed_buff_utility
+
+moveset_quality = 0.40 × fast_quality
+                + 0.45 × mean(charged_quality)
+                + 0.15 × charged_slot_completeness
+```
+
+所有 normalization 都是固定且不依 species 調整：`DPT / 5`、`EPT / 5`、`power / 150`、`DPE / 2.5` 會 clamp 到 `0..1`；`timing_responsiveness = 1 / turns`；`affordability = clamp((100 - energy) / 65)`。Buff utility 依 self buff 或 opponent debuff 的方向、stage 總和與觸發機率計算並 clamp 到 `-1..1`，因此自我 debuff 也會反映為成本。
+
+PvPoke ranking quality 原本就是以推薦 moveset 算出的整體結果，因此 V2.1 **不再把絕對招式品質重複加分**。它只套用以下相對修正：
+
+```text
+move_quality_adjustment = 20 × (actual_quality - recommended_quality)
+V2.1_total = V2_total + move_quality_adjustment
+```
+
+理論候選的 actual 等於 recommended，所以分數不變；庫存實際招式較差時會透明扣分。只有一個蓄力招式仍然合法，但 slot completeness 為 `0.5`，且 coverage 也只使用該招式。
+
+```bash
+pogo-team-optimizer \
+  --league great \
+  --top 50 \
+  --input data/cache/rankings-1500.json \
+  --inventory data/inventory/great_league.csv \
+  --scoring v2.1 \
+  --results 10
+```
+
+庫存執行會產生 `inventory_diagnostics.csv`，每個個體包含：
+
+- 實際與 PvPoke 推薦招式
+- `exact`／`partial`／`different` 比對
+- actual／recommended move-quality 與 delta
+- 是否缺少第二蓄力招式
+- battle-ready、合法但招式不同、招式無效或 form 不符等狀態
+
+建立可直接填寫的繁體中文庫存範本：
+
+```bash
+python -m pogo_team_optimizer.inventory_template
+```
+
+預設輸出 `data/inventory/great_league.csv`，不會覆寫既有檔案；需要覆寫時必須明確加 `--force`。每列是一隻實際個體，目前不要求 IV。
+
 ## V1 資料管線
 
 ```text
@@ -312,6 +373,7 @@ pogo-team-optimizer --league great --top 50 --compare-scoring
 - [x] V1：修正 PvPokeTW CSV 欄位、取前 N 名、建立屬性矩陣、窮舉三人組並輸出 Top teams
 - [x] V1.1：比較五種固定防守評分模型的敏感度、結構偏誤與 ranking stability
 - [x] V2：把實際招式屬性、進攻 coverage 與庫存限制納入評分
+- [x] V2.1：實施 GBL species clause、實際 moveset 品質修正與庫存診斷
 - [ ] V3：建立或匯入 Pokémon 之間的 matchup matrix
 - [ ] V4：以平均值、最差情境與變異程度衡量隊伍 robustness
 - [ ] V5：分析 Lead、Safe Swap、Closer 的排列方式

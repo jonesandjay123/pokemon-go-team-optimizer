@@ -44,6 +44,8 @@ class Move:
     power: float
     energy: float
     energy_gain: float
+    cooldown: float = 0.0
+    turns: int = 1
     buffs: tuple[int, ...] = ()
     buff_target: str | None = None
     buff_apply_chance: float | None = None
@@ -55,9 +57,12 @@ class PokemonCandidate:
 
     ranking: RankingEntry
     species_id: str
+    team_species_key: str
     fast_move: Move
     charged_moves: tuple[Move, ...]
     instance_id: str | None = None
+    recommended_fast_move: Move | None = None
+    recommended_charged_moves: tuple[Move, ...] = ()
 
     @property
     def name(self) -> str:
@@ -74,6 +79,13 @@ class PokemonCandidate:
     @property
     def moves(self) -> tuple[Move, ...]:
         return (self.fast_move, *self.charged_moves)
+
+    @property
+    def recommended_moves(self) -> tuple[Move, ...]:
+        return (
+            self.recommended_fast_move or self.fast_move,
+            *(self.recommended_charged_moves or self.charged_moves),
+        )
 
     def has_stab(self, move: Move) -> bool:
         return move.move_type in self.types

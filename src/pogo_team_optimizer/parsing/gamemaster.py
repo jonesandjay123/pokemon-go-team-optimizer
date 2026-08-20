@@ -23,6 +23,7 @@ def normalize_name(value: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class PokemonMetadata:
+    dex: int
     species_id: str
     name: str
     fast_move_ids: tuple[str, ...]
@@ -90,6 +91,11 @@ def read_game_master(path: Path | str, aliases_path: Path | str | None = None) -
             power=float(item.get("power", 0) or 0),
             energy=float(item.get("energy", 0) or 0),
             energy_gain=float(item.get("energyGain", 0) or 0),
+            cooldown=float(item.get("cooldown", 0) or 0),
+            turns=int(
+                item.get("turns")
+                or max(1, round(float(item.get("cooldown", 500) or 500) / 500))
+            ),
             buffs=tuple(int(value) for value in item.get("buffs", [])),
             buff_target=item.get("buffTarget"),
             buff_apply_chance=(
@@ -107,6 +113,7 @@ def read_game_master(path: Path | str, aliases_path: Path | str | None = None) -
     for item in raw.get("pokemon", []):
         species_id = item["speciesId"]
         pokemon[species_id] = PokemonMetadata(
+            dex=int(item["dex"]),
             species_id=species_id,
             name=item.get("speciesName", species_id),
             fast_move_ids=tuple(item.get("fastMoves", [])),
@@ -155,7 +162,18 @@ def resolve_ranking_entries(
             illegal = [move.name for move in charged if move.move_id not in metadata.charged_move_ids]
             if illegal:
                 raise MoveResolutionError(f"{', '.join(illegal)} 不在 {metadata.name} 的蓄力招式池")
-            candidates.append(PokemonCandidate(entry, species_id, fast, charged))
+            team_species_key = f"dex:{metadata.dex}"
+            candidates.append(
+                PokemonCandidate(
+                    entry,
+                    species_id,
+                    team_species_key,
+                    fast,
+                    charged,
+                    recommended_fast_move=fast,
+                    recommended_charged_moves=charged,
+                )
+            )
         except (MoveResolutionError, IndexError) as error:
             unresolved.append(f"#{entry.rank} {entry.name}: {error}")
     return candidates, unresolved

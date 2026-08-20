@@ -6,21 +6,34 @@ from collections.abc import Sequence
 
 from pogo_team_optimizer.models import PokemonCandidate
 from pogo_team_optimizer.scoring.v2 import V2ScoreBreakdown, score_v2_team
+from pogo_team_optimizer.scoring.v21 import V21ScoreBreakdown, score_v21_team
 
 
 @dataclass(frozen=True, slots=True)
 class V2TeamEvaluation:
     members: tuple[PokemonCandidate, PokemonCandidate, PokemonCandidate]
-    score: V2ScoreBreakdown
+    score: V2ScoreBreakdown | V21ScoreBreakdown
 
 
-def rank_v2_teams(candidates: Sequence[PokemonCandidate]) -> list[V2TeamEvaluation]:
+def is_legal_team(team: tuple[PokemonCandidate, ...]) -> bool:
+    """Enforce unique instances and the GBL species clause (dex identity)."""
+    instance_ids = [member.instance_id for member in team if member.instance_id]
+    return (
+        len(instance_ids) == len(set(instance_ids))
+        and len({member.team_species_key for member in team}) == len(team)
+    )
+
+
+def rank_v2_teams(
+    candidates: Sequence[PokemonCandidate], scoring: str = "v2"
+) -> list[V2TeamEvaluation]:
+    if scoring not in {"v2", "v2.1"}:
+        raise ValueError(f"unsupported move-aware scoring: {scoring}")
+    scorer = score_v21_team if scoring == "v2.1" else score_v2_team
     evaluations = [
-        V2TeamEvaluation((team[0], team[1], team[2]), score_v2_team(team))
+        V2TeamEvaluation((team[0], team[1], team[2]), scorer(team))
         for team in combinations(candidates, 3)
-        # An inventory cannot place the exact same owned instance twice.
-        if len({member.instance_id for member in team if member.instance_id})
-        == sum(member.instance_id is not None for member in team)
+        if is_legal_team(team)
     ]
     evaluations.sort(
         key=lambda value: (

@@ -7,12 +7,13 @@
     {"moveId":"SLUDGE_BOMB","name":"Sludge Bomb","type":"poison","power":80,"energy":50,"energyGain":0},
     {"moveId":"FLAME_CHARGE","name":"Flame Charge","type":"fire","power":65,"energy":50,"energyGain":0,"buffs":[1,0],"buffTarget":"self","buffApplyChance":"1"},
     {"moveId":"SURF","name":"Surf","type":"water","power":75,"energy":45,"energyGain":0},
-    {"moveId":"ICE_BEAM","name":"Ice Beam","type":"ice","power":90,"energy":55,"energyGain":0}
+    {"moveId":"ICE_BEAM","name":"Ice Beam","type":"ice","power":90,"energy":55,"energyGain":0},
+    {"moveId":"WATER_PULSE","name":"Water Pulse","type":"water","power":70,"energy":60,"energyGain":0}
   ],
   "pokemon": [
-    {"speciesId":"bulbasaur","speciesName":"Bulbasaur","types":["grass","poison"],"fastMoves":["VINE_WHIP"],"chargedMoves":["SEED_BOMB","SLUDGE_BOMB"]},
-    {"speciesId":"bulbasaur_shadow","speciesName":"Bulbasaur (Shadow)","types":["grass","poison"],"fastMoves":["VINE_WHIP"],"chargedMoves":["SEED_BOMB","SLUDGE_BOMB"]},
-    {"speciesId":"charmander","speciesName":"Charmander","types":["fire"],"fastMoves":["EMBER"],"chargedMoves":["FLAME_CHARGE"]},
-    {"speciesId":"squirtle","speciesName":"Squirtle","types":["water"],"fastMoves":["WATER_GUN"],"chargedMoves":["SURF","ICE_BEAM"]}
+    {"dex":1,"speciesId":"bulbasaur","speciesName":"Bulbasaur","types":["grass","poison"],"fastMoves":["VINE_WHIP"],"chargedMoves":["SEED_BOMB","SLUDGE_BOMB"]},
+    {"dex":1,"speciesId":"bulbasaur_shadow","speciesName":"Bulbasaur (Shadow)","types":["grass","poison"],"fastMoves":["VINE_WHIP"],"chargedMoves":["SEED_BOMB","SLUDGE_BOMB"]},
+    {"dex":4,"speciesId":"charmander","speciesName":"Charmander","types":["fire"],"fastMoves":["EMBER"],"chargedMoves":["FLAME_CHARGE"]},
+    {"dex":7,"speciesId":"squirtle","speciesName":"Squirtle","types":["water"],"fastMoves":["WATER_GUN"],"chargedMoves":["SURF","ICE_BEAM","WATER_PULSE"]}
   ]
 }

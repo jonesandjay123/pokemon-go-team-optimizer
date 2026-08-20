@@ -11,8 +11,13 @@ from pogo_team_optimizer.inventory import (
     InventoryError,
     inventory_candidates,
     read_inventory,
+    team_buildability_reasons,
 )
-from pogo_team_optimizer.output import write_top_teams, write_v2_top_teams
+from pogo_team_optimizer.output import (
+    write_inventory_diagnostics,
+    write_top_teams,
+    write_v2_top_teams,
+)
 from pogo_team_optimizer.parsing import (
     MoveResolutionError,
     RankingParseError,
@@ -61,7 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--scoring",
-        choices=[name.value for name in ScoringName] + ["v2"],
+        choices=[name.value for name in ScoringName] + ["v2", "v2.1"],
         default=ScoringName.BASELINE.value,
         help="scoring configuration to evaluate (default: baseline)",
     )
@@ -104,11 +109,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--top must be at least 3")
     if args.results < 1:
         parser.error("--results must be at least 1")
-    if args.inventory and args.scoring != "v2":
-        parser.error("--inventory requires --scoring v2")
-    if args.diagnostics and args.scoring != "v2":
-        parser.error("--diagnostics requires --scoring v2")
-    if args.compare_scoring and args.scoring == "v2":
+    if args.inventory and args.scoring not in {"v2", "v2.1"}:
+        parser.error("--inventory requires --scoring v2 or v2.1")
+    if args.diagnostics and args.scoring not in {"v2", "v2.1"}:
+        parser.error("--diagnostics requires --scoring v2 or v2.1")
+    if args.compare_scoring and args.scoring in {"v2", "v2.1"}:
         parser.error("--compare-scoring is for V1/V1.1; use --diagnostics with V2")
 
     league = get_league(args.league)
@@ -125,7 +130,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"請將 PvPoke 排名匯出檔放到這個路徑，或使用 --input 指定檔案。"
         )
 
-    if args.scoring == "v2":
+    if args.scoring in {"v2", "v2.1"}:
         return _run_v2(args, parser, league, input_path, output_directory)
 
     try:
@@ -207,7 +212,7 @@ def _run_v2(args, parser, league, input_path: Path, output_directory: Path) -> i
                 print(f"- {message}", file=sys.stderr)
         if len(theoretical_candidates) < 3:
             parser.error("解析後不足三隻可評分的寶可夢")
-        theoretical = rank_v2_teams(theoretical_candidates)
+        theoretical = rank_v2_teams(theoretical_candidates, scoring=args.scoring)
     except (RankingParseError, MoveResolutionError, ValueError) as error:
         parser.error(str(error))
 
@@ -230,23 +235,33 @@ def _run_v2(args, parser, league, input_path: Path, output_directory: Path) -> i
             print(f"Full-pool unresolved rows: {len(all_unresolved)}", file=sys.stderr)
         if len(owned) < 3:
             parser.error(f"庫存中只有 {len(owned)} 隻可評分候選，至少需要 3 隻")
-        inventory_evaluations = rank_v2_teams(owned)
+        inventory_evaluations = rank_v2_teams(owned, scoring=args.scoring)
 
     evaluations = inventory_evaluations or theoretical
-    default_name = (
-        "top_teams_v2_inventory.csv" if args.inventory else "top_teams_v2.csv"
-    )
+    version = args.scoring.replace(".", "_")
+    default_name = f"top_teams_{version}{'_inventory' if args.inventory else ''}.csv"
     output_path = args.output or output_directory / default_name
     write_v2_top_teams(output_path, evaluations, limit=max(50, args.results))
+    if args.inventory:
+        inventory_diagnostics_path = output_directory / "inventory_diagnostics.csv"
+        write_inventory_diagnostics(inventory_diagnostics_path, diagnostics)
+        print(f"Inventory diagnostics: {inventory_diagnostics_path}")
     if args.diagnostics:
         diagnostics_path = output_directory / "v2_diagnostics.json"
         diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
-        summary = build_v2_diagnostics(top_entries, theoretical)
+        v2_for_diagnostics = (
+            theoretical
+            if args.scoring == "v2"
+            else rank_v2_teams(theoretical_candidates, scoring="v2")
+        )
+        summary = build_v2_diagnostics(top_entries, v2_for_diagnostics)
+        summary["requested_scoring"] = args.scoring
         with diagnostics_path.open("w", encoding="utf-8") as file:
             json.dump(summary, file, ensure_ascii=False, indent=2)
         print(f"Diagnostics: {diagnostics_path}")
     print(
-        f"{league.display_name}: V2 theoretical evaluated {len(theoretical):,} teams "
+        f"{league.display_name}: {args.scoring} theoretical evaluated "
+        f"{len(theoretical):,} teams "
         f"from {len(theoretical_candidates)} resolved top-{args.top} candidates."
     )
     theoretical_names = " / ".join(member.name for member in theoretical[0].members)
@@ -266,10 +281,23 @@ def _run_v2(args, parser, league, input_path: Path, output_directory: Path) -> i
             f"| {best.score.total_score:.4f} | score gap {theoretical[0].score.total_score - best.score.total_score:.4f} "
             f"| ranking pool depth #{max(member.rank for member in best.members)}"
         )
+        print(f"Theoretical Top {min(args.results, 10)} buildability:")
+        for team_rank, evaluation in enumerate(
+            theoretical[: min(args.results, 10)], 1
+        ):
+            reasons = team_buildability_reasons(
+                evaluation.members, owned, diagnostics
+            )
+            print(f"  #{team_rank}: {'; '.join(reasons)}")
         for diagnostic in diagnostics:
             print(
                 f"inventory {diagnostic.instance_id}: {diagnostic.status.value} "
-                f"— {diagnostic.message}"
+                f"— match={diagnostic.moveset_match or 'n/a'}; "
+                f"actual={' / '.join(diagnostic.actual_moves) or 'n/a'}; "
+                f"recommended={' / '.join(diagnostic.recommended_moves) or 'n/a'}; "
+                f"quality={diagnostic.actual_move_quality!s} vs "
+                f"{diagnostic.recommended_move_quality!s}; "
+                f"delta={diagnostic.move_quality_delta!s}; {diagnostic.message}"
             )
     print(f"Results: {output_path}")
     print(f"Top {args.results}:")
