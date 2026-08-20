@@ -23,6 +23,17 @@ classifiers = [
 
 [project.scripts]
 pogo-team-optimizer = "pogo_team_optimizer.optimize:main"
+pogo-battle-validate = "pogo_team_optimizer.battle.validate_v3:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"pogo_team_optimizer.battle" = [
+  "vendor/pvpoke/LICENSE",
+  "vendor/pvpoke/*.md",
+  "vendor/pvpoke/*.js",
+  "vendor/pvpoke/actions/*.js",
+  "vendor/pvpoke/timeline/*.js",
+  "vendor/pvpoke/training/*.js",
+]

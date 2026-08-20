@@ -20,3 +20,5 @@ results/*/*.json
 !data/inventory/
 data/inventory/*.csv
 !data/inventory/great_league.example.csv
+data/inventory/*.json
+!data/inventory/*.example.json

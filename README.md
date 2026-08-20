@@ -3,7 +3,7 @@
 一個實驗性的 Pokémon GO PvP 隊伍最佳化引擎，目標是從排名資料、屬性相剋、招式配置與對戰模擬中，找出 Great League、Ultra League 與 Master League 裡穩定且互補的三隻寶可夢組合。
 
 > [!WARNING]
-> V2 已加入實際招式屬性與進攻 coverage，但仍不是戰鬥模擬器；尚未計算傷害量、出招時間、盾、CMP、IV 或隊伍順序。輸出適合比較透明的隊伍結構，不應直接視為實戰勝率排名。
+> V2 已加入實際招式屬性與進攻 coverage，但 V2 本身仍不是戰鬥模擬器。V3 另以官方 PvPoke 引擎執行聚焦的 1v1 實戰驗證；尚未做 IV-specific 或有順序的完整 3v3 模擬。
 
 ## 為什麼做這個專案
 
@@ -450,6 +450,47 @@ pogo-team-optimizer --league great --top 50 --compare-scoring
 
 所有結果檔都由 `.gitignore` 排除。V1.1 模型只是敏感度實驗，**不代表真實勝率更高**，也沒有加入招式 coverage、傷害、能量、盾或戰鬥模擬。
 
+## V3：PvPoke 實戰驗證
+
+V3 是獨立的 matchup validation pipeline，不改動或混入任何 V1～V2.2a 權重。它鎖定並直接執行官方 PvPoke 的 `Battle.js`、`Pokemon.js`、`ActionLogic.js` 與傷害計算程式，而不是另外發明簡化傷害公式。Vendored source、上游 commit 與 MIT License 位於 `src/pogo_team_optimizer/battle/vendor/pvpoke/`。
+
+V3 額外需要 Node.js。Python bridge 會一次批次送出所有 matchup，並記錄：
+
+- 0–0、1–1、2–2 盾
+- 勝／負／平手與雙方 Battle Rating
+- 戰後剩餘 HP
+- PvPoke 實際套用的 CP、等級與 IV
+- 每一 moveset 的勝率、平均 rating、各盾表現與勝負翻轉
+- 每隊無人能勝、恰一人能勝、至少兩人能勝、共同 hard counters 與最差 matchup
+
+基準情境雙方皆從滿 HP、0 energy 開始。候選與對手一致使用 GameMaster 的 `defaultIVs.cp1500`、等級上限 50；因此使用者輸入的實際 CP 只用於 inventory/readiness，不會被假裝成已知 IV。這是標準化 build 的 1v1 驗證，不是 IV-specific 模擬。
+
+隊伍 robustness 公式保持獨立且完全公開：
+
+```text
+coverage_rate = opponent × shield cells 中至少一名隊員獲勝的比例
+depth_rate    = mean(min(winning_members, 2) / 2)
+rating_rate   = 全部隊員 matchup 的平均 Battle Rating / 1000
+
+robustness = 100 × (
+    0.60 × coverage_rate
+  + 0.20 × depth_rate
+  + 0.20 × rating_rate
+)
+```
+
+可複製 `data/inventory/v3_experiment.example.json` 定義 moveset variants、三人隊與 pairwise comparisons。真實個人 experiment JSON 與所有結果都會被 Git 忽略。
+
+```bash
+pogo-battle-validate \
+  --experiment data/inventory/great_league_v3.json \
+  --rankings data/cache/rankings-1500.json \
+  --gamemaster data/cache/gamemaster.json \
+  --meta-sizes 50 100
+```
+
+輸出為 `v3_matchups_top<N>.csv` 與 `v3_summary_top<N>.json`。Lead 使用 2 盾平均、Closer 使用 0 盾平均、Safe Swap 使用 1 盾最差 rating 再以平均 rating tie-break；這些角色只標為初步建議。V3 尚未模擬換人、能量領先、誘盾、完整隊伍順序或 ordered 3v3。
+
 ## Roadmap
 
 - [x] V1：修正 PvPokeTW CSV 欄位、取前 N 名、建立屬性矩陣、窮舉三人組並輸出 Top teams
@@ -458,7 +499,7 @@ pogo-team-optimizer --league great --top 50 --compare-scoring
 - [x] V2.1：實施 GBL species clause、實際 moveset 品質修正與庫存診斷
 - [x] V2.2：區分 ready-now 與 power-up-needed，輸出 CP 強化差距
 - [x] V2.2a：以 provisional recommended moves 探索未完成招式盤點的庫存
-- [ ] V3：建立或匯入 Pokémon 之間的 matchup matrix
+- [x] V3：直接重用 PvPoke 引擎建立 0／1／2 盾 matchup matrix 與聚焦隊伍 robustness
 - [ ] V4：以平均值、最差情境與變異程度衡量隊伍 robustness
 - [ ] V5：分析 Lead、Safe Swap、Closer 的排列方式
 - [ ] V6：比較 0、1、2 盾情境並提供缺角替代方案

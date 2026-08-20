@@ -1,0 +1,42 @@
+{
+  "id": "gamemaster",
+  "title": "V3 test fixture",
+  "timestamp": "2026-08-18 07:03:52",
+  "formats": [],
+  "rankingScenarios": [],
+  "settings": {"partySize": 3, "maxBuffStages": 4, "buffDivisor": 4},
+  "pokemon": [
+    {
+      "dex": 334,
+      "speciesName": "Altaria",
+      "speciesId": "altaria",
+      "baseStats": {"atk": 141, "def": 201, "hp": 181},
+      "types": ["dragon", "flying"],
+      "fastMoves": ["DRAGON_BREATH"],
+      "chargedMoves": ["SKY_ATTACK", "FLAMETHROWER"],
+      "defaultIVs": {"cp500": [9.5,4,15,12], "cp1500": [28.5,4,12,13], "cp2500": [50,15,15,15]},
+      "released": true,
+      "tags": []
+    },
+    {
+      "dex": 340,
+      "speciesName": "Whiscash",
+      "speciesId": "whiscash",
+      "baseStats": {"atk": 151, "def": 141, "hp": 242},
+      "types": ["water", "ground"],
+      "fastMoves": ["MUD_SHOT"],
+      "chargedMoves": ["BLIZZARD", "MUD_BOMB"],
+      "defaultIVs": {"cp500": [9,5,15,15], "cp1500": [27,4,15,15], "cp2500": [50,15,15,15]},
+      "released": true,
+      "tags": []
+    }
+  ],
+  "moves": [
+    {"moveId":"BLIZZARD","name":"Blizzard","abbreviation":"Bl","type":"ice","power":140,"energy":75,"energyGain":0,"cooldown":500,"archetype":"Nuke","turns":1},
+    {"moveId":"DRAGON_BREATH","name":"Dragon Breath","abbreviation":"DB","type":"dragon","power":3,"energy":0,"energyGain":4,"cooldown":500,"archetype":"Multipurpose","turns":1},
+    {"moveId":"FLAMETHROWER","name":"Flamethrower","abbreviation":"Ft","type":"fire","power":90,"energy":55,"energyGain":0,"cooldown":500,"archetype":"High Energy","turns":1},
+    {"moveId":"MUD_BOMB","name":"Mud Bomb","abbreviation":"MB","type":"ground","power":65,"energy":45,"energyGain":0,"cooldown":500,"archetype":"General","turns":1},
+    {"moveId":"MUD_SHOT","name":"Mud Shot","abbreviation":"MS","type":"ground","power":3,"energy":0,"energyGain":9,"cooldown":1000,"archetype":"Fast Charge","turns":2},
+    {"moveId":"SKY_ATTACK","name":"Sky Attack","abbreviation":"SA","type":"flying","power":75,"energy":50,"energyGain":0,"cooldown":500,"archetype":"General","turns":1}
+  ]
+}

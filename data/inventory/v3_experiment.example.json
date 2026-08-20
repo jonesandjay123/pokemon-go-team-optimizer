@@ -1,0 +1,26 @@
+{
+  "variants": {
+    "whiscash_current": {
+      "label": "Whiscash current",
+      "species_id": "whiscash",
+      "fast_move": "MUD_SHOT",
+      "charged_moves": ["BLIZZARD", "MUD_BOMB"]
+    },
+    "shiftry_current": {
+      "label": "Shiftry current",
+      "species_id": "shiftry",
+      "fast_move": "BULLET_SEED",
+      "charged_moves": ["FOUL_PLAY", "LEAF_BLADE"]
+    },
+    "registeel_current": {
+      "label": "Registeel current",
+      "species_id": "registeel",
+      "fast_move": "LOCK_ON",
+      "charged_moves": ["FLASH_CANNON", "FOCUS_BLAST"]
+    }
+  },
+  "teams": {
+    "A_current": ["whiscash_current", "shiftry_current", "registeel_current"]
+  },
+  "comparisons": []
+}
