@@ -207,6 +207,47 @@ python -m pogo_team_optimizer.inventory_template
 
 預設輸出 `data/inventory/great_league.csv`，不會覆寫既有檔案；需要覆寫時必須明確加 `--force`。每列是一隻實際個體，目前不要求 IV。
 
+## V2.2：Battle Readiness／強化差距
+
+V2.2 在 V2.1 上增加獨立的庫存準備度分類，不改動 V1、V1.1、V2 理論排名或 V2.1 move-quality：
+
+- `ready-now`：CP 已達 target CP 的設定比例，今晚可列入即戰隊伍。
+- `power-up-needed`：species、form 與招式都合法，但 CP 仍明顯低於目標；不會被當成未擁有。
+- `ineligible-over-cap`：CP 超過聯盟上限，不能參賽。
+- `invalid/missing-move`：缺少必要招式或招式不屬於該 form。
+- `missing-species/form`：無法可靠解析或排名中沒有正確 form。
+
+Target CP 優先使用排名輸入中的 optimized CP。PvPoke machine-readable ranking JSON 沒有該欄時，會明確使用聯盟 CP cap 作 `league-cap-fallback`。預設 ready threshold 集中定義為 `0.95`，即：
+
+```text
+readiness_ratio = actual_cp / target_cp
+ready-now       = readiness_ratio >= 0.95
+cp_gap          = max(0, target_cp - actual_cp)
+```
+
+`95%` 容許少量 CP／IV build 差異，但可把 CP 900／1500 這類明顯尚未強化完成的個體分開。可用 CLI 集中覆寫，不會散落 hard-code：
+
+```bash
+pogo-team-optimizer \
+  --league great \
+  --top 50 \
+  --input data/cache/rankings-1500.json \
+  --inventory data/inventory/great_league.csv \
+  --scoring v2.2 \
+  --ready-threshold 0.95 \
+  --results 10
+```
+
+庫存結果會清楚分成三組：
+
+- `top_teams_v2_2_ready.csv`：三名成員全部為 ready-now 的目前可玩隊伍。
+- `top_teams_v2_2_power_up.csv`：至少一名 owned member 尚需強化的潛力隊伍，附 actual CP、target CP 與 gap。
+- `top_teams_v2_2_theoretical.csv`：不受庫存限制的理論隊伍。
+
+`inventory_diagnostics.csv` 也會對每個個體增加 actual CP、target CP、CP gap、readiness ratio、readiness status 與 target source，同時保留 V2.1 的 actual/recommended moves、move-quality delta 與第二蓄力招狀態。
+
+CP ratio **不是**精確戰力模型，也不是 IV-specific battle simulation。它只用來判斷「已接近預定 build」或「還需要強化」；實際 IV、Stardust／糖果成本、盾、對戰模擬與出場順序仍屬未來里程碑。
+
 ## V1 資料管線
 
 ```text
@@ -374,6 +415,7 @@ pogo-team-optimizer --league great --top 50 --compare-scoring
 - [x] V1.1：比較五種固定防守評分模型的敏感度、結構偏誤與 ranking stability
 - [x] V2：把實際招式屬性、進攻 coverage 與庫存限制納入評分
 - [x] V2.1：實施 GBL species clause、實際 moveset 品質修正與庫存診斷
+- [x] V2.2：區分 ready-now 與 power-up-needed，輸出 CP 強化差距
 - [ ] V3：建立或匯入 Pokémon 之間的 matchup matrix
 - [ ] V4：以平均值、最差情境與變異程度衡量隊伍 robustness
 - [ ] V5：分析 Lead、Safe Swap、Closer 的排列方式

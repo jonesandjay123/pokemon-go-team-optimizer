@@ -9,6 +9,13 @@ from collections.abc import Sequence
 from pogo_team_optimizer.models import InventoryPokemon, MoveKind, PokemonCandidate
 from pogo_team_optimizer.parsing.gamemaster import GameMaster, MoveResolutionError
 from pogo_team_optimizer.scoring.move_quality import score_moveset_quality
+from pogo_team_optimizer.readiness import (
+    DEFAULT_READINESS_CONFIG,
+    ReadinessAssessment,
+    ReadinessConfig,
+    ReadinessStatus,
+    assess_readiness,
+)
 
 
 class InventoryError(ValueError):
@@ -38,6 +45,7 @@ class InventoryDiagnostic:
     recommended_move_quality: float | None = None
     move_quality_delta: float | None = None
     second_charged_move_missing: bool = False
+    readiness: ReadinessAssessment | None = None
 
 
 def _boolean(value: str) -> bool:
@@ -92,12 +100,15 @@ def inventory_candidates(
     rankings: Sequence[PokemonCandidate],
     game_master: GameMaster,
     cp_cap: int | None = None,
+    readiness_config: ReadinessConfig = DEFAULT_READINESS_CONFIG,
 ) -> tuple[list[PokemonCandidate], list[InventoryDiagnostic]]:
     """Intersect all rankings with owned instances, then apply actual moves."""
     ranked_by_id = {candidate.species_id: candidate for candidate in rankings}
     output: list[PokemonCandidate] = []
     diagnostics: list[InventoryDiagnostic] = []
+    readiness_cap = cp_cap or 10_000
     for owned in inventory:
+        raw_actual_moves = owned.move_names
         label = owned.pokemon_name
         if owned.form:
             label = f"{label}_{owned.form}"
@@ -110,13 +121,35 @@ def inventory_candidates(
                         owned.instance_id,
                         InventoryStatus.WRONG_FORM,
                         f"無法解析指定形態 {owned.form!r}：{form_error}",
+                        actual_moves=raw_actual_moves,
+                        readiness=assess_readiness(
+                            owned.cp,
+                            0,
+                            readiness_cap,
+                            readiness_config,
+                            ReadinessStatus.MISSING_SPECIES_FORM,
+                        ),
                     )
                 )
                 continue
             try:
                 base_id = game_master.resolve_species_id(owned.pokemon_name)
             except MoveResolutionError as error:
-                diagnostics.append(InventoryDiagnostic(owned.instance_id, InventoryStatus.SPECIES_NOT_RANKED, str(error)))
+                diagnostics.append(
+                    InventoryDiagnostic(
+                        owned.instance_id,
+                        InventoryStatus.SPECIES_NOT_RANKED,
+                        str(error),
+                        actual_moves=raw_actual_moves,
+                        readiness=assess_readiness(
+                            owned.cp,
+                            0,
+                            readiness_cap,
+                            readiness_config,
+                            ReadinessStatus.MISSING_SPECIES_FORM,
+                        ),
+                    )
+                )
                 continue
         species_id = base_id
         if owned.shadow and not species_id.endswith("_shadow"):
@@ -135,6 +168,14 @@ def inventory_candidates(
                     f"排名中找不到正確形態：{species_id}",
                     species_id=species_id,
                     team_species_key=(f"dex:{metadata.dex}" if metadata else None),
+                    actual_moves=raw_actual_moves,
+                    readiness=assess_readiness(
+                        owned.cp,
+                        0,
+                        readiness_cap,
+                        readiness_config,
+                        ReadinessStatus.MISSING_SPECIES_FORM,
+                    ),
                 )
             )
             continue
@@ -146,6 +187,17 @@ def inventory_candidates(
                     f"CP {owned.cp} 超過上限 {cp_cap}",
                     species_id=species_id,
                     team_species_key=theoretical.team_species_key,
+                    actual_moves=raw_actual_moves,
+                    recommended_moves=tuple(
+                        move.name for move in theoretical.recommended_moves
+                    ),
+                    readiness=assess_readiness(
+                        owned.cp,
+                        theoretical.ranking.cp,
+                        readiness_cap,
+                        readiness_config,
+                        ReadinessStatus.INELIGIBLE_OVER_CAP,
+                    ),
                 )
             )
             continue
@@ -157,7 +209,18 @@ def inventory_candidates(
                     "缺少快速招式或第一個蓄力招式",
                     species_id=species_id,
                     team_species_key=theoretical.team_species_key,
+                    actual_moves=raw_actual_moves,
+                    recommended_moves=tuple(
+                        move.name for move in theoretical.recommended_moves
+                    ),
                     second_charged_move_missing=not owned.charged_move_2,
+                    readiness=assess_readiness(
+                        owned.cp,
+                        theoretical.ranking.cp,
+                        readiness_cap,
+                        readiness_config,
+                        ReadinessStatus.INVALID_MISSING_MOVE,
+                    ),
                 )
             )
             continue
@@ -176,6 +239,17 @@ def inventory_candidates(
                     str(error),
                     species_id=species_id,
                     team_species_key=theoretical.team_species_key,
+                    actual_moves=raw_actual_moves,
+                    recommended_moves=tuple(
+                        move.name for move in theoretical.recommended_moves
+                    ),
+                    readiness=assess_readiness(
+                        owned.cp,
+                        theoretical.ranking.cp,
+                        readiness_cap,
+                        readiness_config,
+                        ReadinessStatus.INVALID_MISSING_MOVE,
+                    ),
                 )
             )
             continue
@@ -190,6 +264,17 @@ def inventory_candidates(
                     "招式不在該形態的 GameMaster 招式池",
                     species_id=species_id,
                     team_species_key=theoretical.team_species_key,
+                    actual_moves=raw_actual_moves,
+                    recommended_moves=tuple(
+                        move.name for move in theoretical.recommended_moves
+                    ),
+                    readiness=assess_readiness(
+                        owned.cp,
+                        theoretical.ranking.cp,
+                        readiness_cap,
+                        readiness_config,
+                        ReadinessStatus.INVALID_MISSING_MOVE,
+                    ),
                 )
             )
             continue
@@ -232,6 +317,12 @@ def inventory_candidates(
                 recommended_quality.total_score,
                 actual_quality.total_score - recommended_quality.total_score,
                 len(actual.charged_moves) == 1,
+                assess_readiness(
+                    owned.cp,
+                    theoretical.ranking.cp,
+                    readiness_cap,
+                    readiness_config,
+                ),
             )
         )
         output.append(actual)
@@ -261,6 +352,15 @@ def team_buildability_reasons(
         ]
         if matching_eligible:
             details: list[str] = ["eligible instance owned"]
+            readiness_statuses = {
+                item.readiness.status
+                for item in matching_diagnostics
+                if item.readiness is not None
+            }
+            if ReadinessStatus.READY_NOW in readiness_statuses:
+                details.append("ready now")
+            elif ReadinessStatus.POWER_UP_NEEDED in readiness_statuses:
+                details.append("power-up needed")
             if any(item.moveset_match != "exact" for item in matching_diagnostics):
                 details.append("actual moves differ")
             if any(item.second_charged_move_missing for item in matching_diagnostics):
@@ -274,3 +374,45 @@ def team_buildability_reasons(
             reason = "species not owned"
         reasons.append(f"{member.name}: {reason}")
     return tuple(reasons)
+
+
+def readiness_by_instance(
+    diagnostics: Sequence[InventoryDiagnostic],
+) -> dict[str, ReadinessAssessment]:
+    return {
+        item.instance_id: item.readiness
+        for item in diagnostics
+        if item.readiness is not None
+    }
+
+
+def ready_now_candidates(
+    candidates: Sequence[PokemonCandidate],
+    diagnostics: Sequence[InventoryDiagnostic],
+) -> list[PokemonCandidate]:
+    assessments = readiness_by_instance(diagnostics)
+    return [
+        candidate
+        for candidate in candidates
+        if candidate.instance_id is not None
+        and assessments[candidate.instance_id].status is ReadinessStatus.READY_NOW
+    ]
+
+
+def team_power_up_gaps(
+    team: Sequence[PokemonCandidate],
+    diagnostics: Sequence[InventoryDiagnostic],
+) -> tuple[tuple[str, int, int, int], ...]:
+    assessments = readiness_by_instance(diagnostics)
+    return tuple(
+        (
+            candidate.name,
+            assessment.actual_cp,
+            assessment.target_cp,
+            assessment.cp_gap,
+        )
+        for candidate in team
+        if candidate.instance_id is not None
+        and (assessment := assessments[candidate.instance_id]).status
+        is ReadinessStatus.POWER_UP_NEEDED
+    )

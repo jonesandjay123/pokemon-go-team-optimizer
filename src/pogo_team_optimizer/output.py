@@ -1,12 +1,13 @@
 """Result serialization for V1 optimization runs."""
 
 import csv
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from pogo_team_optimizer.search import TeamEvaluation
 from pogo_team_optimizer.search_v2 import V2TeamEvaluation
 from pogo_team_optimizer.inventory import InventoryDiagnostic
+from pogo_team_optimizer.readiness import ReadinessAssessment
 
 
 RESULT_FIELDS = (
@@ -73,11 +74,21 @@ V2_RESULT_FIELDS = (
     "fast_super_effective_types",
     "actual_move_quality", "recommended_move_quality", "move_quality_delta",
     "move_quality_adjustment",
+    "actual_cp_1", "target_cp_1", "cp_gap_1", "readiness_ratio_1",
+    "readiness_status_1", "target_cp_source_1",
+    "actual_cp_2", "target_cp_2", "cp_gap_2", "readiness_ratio_2",
+    "readiness_status_2", "target_cp_source_2",
+    "actual_cp_3", "target_cp_3", "cp_gap_3", "readiness_ratio_3",
+    "readiness_status_3", "target_cp_source_3",
 )
 
 
 def write_v2_top_teams(
-    path: Path | str, evaluations: Sequence[V2TeamEvaluation], limit: int = 50
+    path: Path | str,
+    evaluations: Sequence[V2TeamEvaluation],
+    limit: int = 50,
+    readiness: Mapping[str, ReadinessAssessment] | None = None,
+    scoring_name: str | None = None,
 ) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,9 +98,12 @@ def write_v2_top_teams(
         for overall_rank, evaluation in enumerate(evaluations[:limit], start=1):
             raw_score = evaluation.score
             score = getattr(raw_score, "v2_score", raw_score)
-            scoring = "v2.1" if hasattr(raw_score, "v2_score") else "v2"
+            has_move_quality = hasattr(raw_score, "v2_score")
+            scoring = scoring_name or (
+                "v2.1" if has_move_quality else "v2"
+            )
             members = evaluation.members
-            writer.writerow({
+            row = {
                 "overall_rank": overall_rank,
                 "scoring": scoring,
                 **{f"pokemon_{i}": member.name for i, member in enumerate(members, 1)},
@@ -108,21 +122,44 @@ def write_v2_top_teams(
                 "fast_super_effective_types": "|".join(v.value for v in score.fast_move_summary.super_effective),
                 "actual_move_quality": (
                     f"{raw_score.actual_move_quality:.6f}"
-                    if scoring == "v2.1" else ""
+                    if has_move_quality else ""
                 ),
                 "recommended_move_quality": (
                     f"{raw_score.recommended_move_quality:.6f}"
-                    if scoring == "v2.1" else ""
+                    if has_move_quality else ""
                 ),
                 "move_quality_delta": (
                     f"{raw_score.move_quality_delta:.6f}"
-                    if scoring == "v2.1" else ""
+                    if has_move_quality else ""
                 ),
                 "move_quality_adjustment": (
                     f"{raw_score.move_quality_adjustment:.6f}"
-                    if scoring == "v2.1" else ""
+                    if has_move_quality else ""
                 ),
-            })
+            }
+            for index, member in enumerate(members, 1):
+                assessment = (
+                    readiness.get(member.instance_id)
+                    if readiness is not None and member.instance_id is not None
+                    else None
+                )
+                row.update(
+                    {
+                        f"actual_cp_{index}": assessment.actual_cp if assessment else "",
+                        f"target_cp_{index}": assessment.target_cp if assessment else "",
+                        f"cp_gap_{index}": assessment.cp_gap if assessment else "",
+                        f"readiness_ratio_{index}": (
+                            f"{assessment.readiness_ratio:.6f}" if assessment else ""
+                        ),
+                        f"readiness_status_{index}": (
+                            assessment.status.value if assessment else ""
+                        ),
+                        f"target_cp_source_{index}": (
+                            assessment.target_source.value if assessment else ""
+                        ),
+                    }
+                )
+            writer.writerow(row)
 
 
 INVENTORY_DIAGNOSTIC_FIELDS = (
@@ -130,6 +167,8 @@ INVENTORY_DIAGNOSTIC_FIELDS = (
     "recommended_moves", "moveset_match", "actual_move_quality",
     "recommended_move_quality", "move_quality_delta",
     "second_charged_move_missing", "message",
+    "actual_cp", "target_cp", "cp_gap", "readiness_ratio",
+    "readiness_status", "target_cp_source",
 )
 
 
@@ -164,5 +203,18 @@ def write_inventory_diagnostics(
                     ),
                     "second_charged_move_missing": item.second_charged_move_missing,
                     "message": item.message,
+                    "actual_cp": item.readiness.actual_cp if item.readiness else "",
+                    "target_cp": item.readiness.target_cp if item.readiness else "",
+                    "cp_gap": item.readiness.cp_gap if item.readiness else "",
+                    "readiness_ratio": (
+                        f"{item.readiness.readiness_ratio:.6f}"
+                        if item.readiness else ""
+                    ),
+                    "readiness_status": (
+                        item.readiness.status.value if item.readiness else ""
+                    ),
+                    "target_cp_source": (
+                        item.readiness.target_source.value if item.readiness else ""
+                    ),
                 }
             )

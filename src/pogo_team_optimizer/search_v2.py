@@ -27,9 +27,9 @@ def is_legal_team(team: tuple[PokemonCandidate, ...]) -> bool:
 def rank_v2_teams(
     candidates: Sequence[PokemonCandidate], scoring: str = "v2"
 ) -> list[V2TeamEvaluation]:
-    if scoring not in {"v2", "v2.1"}:
+    if scoring not in {"v2", "v2.1", "v2.2"}:
         raise ValueError(f"unsupported move-aware scoring: {scoring}")
-    scorer = score_v21_team if scoring == "v2.1" else score_v2_team
+    scorer = score_v2_team if scoring == "v2" else score_v21_team
     evaluations = [
         V2TeamEvaluation((team[0], team[1], team[2]), scorer(team))
         for team in combinations(candidates, 3)

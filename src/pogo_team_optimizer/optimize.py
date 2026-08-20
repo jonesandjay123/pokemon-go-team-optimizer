@@ -11,7 +11,10 @@ from pogo_team_optimizer.inventory import (
     InventoryError,
     inventory_candidates,
     read_inventory,
+    readiness_by_instance,
+    ready_now_candidates,
     team_buildability_reasons,
+    team_power_up_gaps,
 )
 from pogo_team_optimizer.output import (
     write_inventory_diagnostics,
@@ -30,6 +33,10 @@ from pogo_team_optimizer.parsing import (
 from pogo_team_optimizer.scoring import ScoringName, get_scoring_config
 from pogo_team_optimizer.search import candidate_team_count, rank_teams
 from pogo_team_optimizer.search_v2 import rank_v2_teams
+from pogo_team_optimizer.readiness import (
+    DEFAULT_READINESS_CONFIG,
+    ReadinessConfig,
+)
 from pogo_team_optimizer.v2_diagnostics import build_v2_diagnostics
 from pogo_team_optimizer.sensitivity import (
     run_sensitivity_analysis,
@@ -66,12 +73,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--scoring",
-        choices=[name.value for name in ScoringName] + ["v2", "v2.1"],
+        choices=[name.value for name in ScoringName] + ["v2", "v2.1", "v2.2"],
         default=ScoringName.BASELINE.value,
         help="scoring configuration to evaluate (default: baseline)",
     )
     parser.add_argument(
-        "--inventory", type=Path, help="owned-instance inventory CSV (V2 only)"
+        "--inventory", type=Path, help="owned-instance inventory CSV (V2/V2.1/V2.2)"
     )
     parser.add_argument(
         "--gamemaster",
@@ -90,9 +97,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="number of fallback teams to display (default: 10)",
     )
     parser.add_argument(
+        "--ready-threshold",
+        type=float,
+        default=DEFAULT_READINESS_CONFIG.ready_ratio_threshold,
+        metavar="RATIO",
+        help="ready-now CP/target-CP ratio for V2.2 (default: 0.95)",
+    )
+    parser.add_argument(
         "--diagnostics",
         action="store_true",
-        help="write full V2 versus V1/V1.1 diagnostics (V2 only)",
+        help="write full move-aware versus V1/V1.1 diagnostics",
     )
     parser.add_argument(
         "--compare-scoring",
@@ -109,11 +123,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--top must be at least 3")
     if args.results < 1:
         parser.error("--results must be at least 1")
-    if args.inventory and args.scoring not in {"v2", "v2.1"}:
-        parser.error("--inventory requires --scoring v2 or v2.1")
-    if args.diagnostics and args.scoring not in {"v2", "v2.1"}:
-        parser.error("--diagnostics requires --scoring v2 or v2.1")
-    if args.compare_scoring and args.scoring in {"v2", "v2.1"}:
+    try:
+        readiness_config = ReadinessConfig(args.ready_threshold)
+    except ValueError as error:
+        parser.error(str(error))
+    if args.inventory and args.scoring not in {"v2", "v2.1", "v2.2"}:
+        parser.error("--inventory requires --scoring v2, v2.1, or v2.2")
+    if args.diagnostics and args.scoring not in {"v2", "v2.1", "v2.2"}:
+        parser.error("--diagnostics requires move-aware scoring")
+    if args.compare_scoring and args.scoring in {"v2", "v2.1", "v2.2"}:
         parser.error("--compare-scoring is for V1/V1.1; use --diagnostics with V2")
 
     league = get_league(args.league)
@@ -130,8 +148,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"請將 PvPoke 排名匯出檔放到這個路徑，或使用 --input 指定檔案。"
         )
 
-    if args.scoring in {"v2", "v2.1"}:
-        return _run_v2(args, parser, league, input_path, output_directory)
+    if args.scoring in {"v2", "v2.1", "v2.2"}:
+        return _run_v2(
+            args,
+            parser,
+            league,
+            input_path,
+            output_directory,
+            readiness_config,
+        )
 
     try:
         entries = select_top(read_rankings(input_path), args.top)
@@ -190,7 +215,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _run_v2(args, parser, league, input_path: Path, output_directory: Path) -> int:
+def _run_v2(
+    args,
+    parser,
+    league,
+    input_path: Path,
+    output_directory: Path,
+    readiness_config: ReadinessConfig,
+) -> int:
     if not args.gamemaster.is_file():
         parser.error(
             f"找不到 PvPoke GameMaster：{args.gamemaster}。請下載 gamemaster.json 或用 --gamemaster 指定。"
@@ -217,6 +249,8 @@ def _run_v2(args, parser, league, input_path: Path, output_directory: Path) -> i
         parser.error(str(error))
 
     inventory_evaluations = None
+    ready_evaluations = []
+    power_up_evaluations = []
     diagnostics = []
     if args.inventory:
         try:
@@ -228,6 +262,7 @@ def _run_v2(args, parser, league, input_path: Path, output_directory: Path) -> i
                 all_candidates,
                 game_master,
                 league.cp_cap,
+                readiness_config,
             )
         except (InventoryError, MoveResolutionError, ValueError) as error:
             parser.error(str(error))
@@ -236,12 +271,41 @@ def _run_v2(args, parser, league, input_path: Path, output_directory: Path) -> i
         if len(owned) < 3:
             parser.error(f"庫存中只有 {len(owned)} 隻可評分候選，至少需要 3 隻")
         inventory_evaluations = rank_v2_teams(owned, scoring=args.scoring)
+        if args.scoring == "v2.2":
+            ready = ready_now_candidates(owned, diagnostics)
+            ready_evaluations = (
+                rank_v2_teams(ready, scoring=args.scoring) if len(ready) >= 3 else []
+            )
+            power_up_evaluations = [
+                evaluation
+                for evaluation in inventory_evaluations
+                if team_power_up_gaps(evaluation.members, diagnostics)
+            ]
+
+    if args.scoring == "v2.2" and args.inventory:
+        return _write_and_report_v22_inventory(
+            args,
+            league,
+            output_directory,
+            theoretical,
+            top_entries,
+            theoretical_candidates,
+            owned,
+            diagnostics,
+            ready_evaluations,
+            power_up_evaluations,
+        )
 
     evaluations = inventory_evaluations or theoretical
     version = args.scoring.replace(".", "_")
     default_name = f"top_teams_{version}{'_inventory' if args.inventory else ''}.csv"
     output_path = args.output or output_directory / default_name
-    write_v2_top_teams(output_path, evaluations, limit=max(50, args.results))
+    write_v2_top_teams(
+        output_path,
+        evaluations,
+        limit=max(50, args.results),
+        scoring_name=args.scoring,
+    )
     if args.inventory:
         inventory_diagnostics_path = output_directory / "inventory_diagnostics.csv"
         write_inventory_diagnostics(inventory_diagnostics_path, diagnostics)
@@ -305,6 +369,107 @@ def _run_v2(args, parser, league, input_path: Path, output_directory: Path) -> i
         names = " / ".join(member.name for member in evaluation.members)
         print(f"{rank:>2}. {names} | {evaluation.score.total_score:.4f}")
     return 0
+
+
+def _write_and_report_v22_inventory(
+    args,
+    league,
+    output_directory: Path,
+    theoretical,
+    top_entries,
+    theoretical_candidates,
+    owned,
+    diagnostics,
+    ready_evaluations,
+    power_up_evaluations,
+) -> int:
+    assessments = readiness_by_instance(diagnostics)
+    if args.output:
+        ready_path = args.output
+        power_path = args.output.with_name(f"{args.output.stem}_power_up{args.output.suffix}")
+        theoretical_path = args.output.with_name(
+            f"{args.output.stem}_theoretical{args.output.suffix}"
+        )
+    else:
+        ready_path = output_directory / "top_teams_v2_2_ready.csv"
+        power_path = output_directory / "top_teams_v2_2_power_up.csv"
+        theoretical_path = output_directory / "top_teams_v2_2_theoretical.csv"
+    limit = max(50, args.results)
+    write_v2_top_teams(
+        ready_path,
+        ready_evaluations,
+        limit,
+        assessments,
+        scoring_name="v2.2",
+    )
+    write_v2_top_teams(
+        power_path,
+        power_up_evaluations,
+        limit,
+        assessments,
+        scoring_name="v2.2",
+    )
+    write_v2_top_teams(
+        theoretical_path,
+        theoretical,
+        limit,
+        scoring_name="v2.2",
+    )
+    diagnostics_path = output_directory / "inventory_diagnostics.csv"
+    write_inventory_diagnostics(diagnostics_path, diagnostics)
+    if args.diagnostics:
+        v2_diagnostics_path = output_directory / "v2_diagnostics.json"
+        summary = build_v2_diagnostics(
+            top_entries,
+            rank_v2_teams(theoretical_candidates, scoring="v2"),
+        )
+        summary["requested_scoring"] = "v2.2"
+        with v2_diagnostics_path.open("w", encoding="utf-8") as file:
+            json.dump(summary, file, ensure_ascii=False, indent=2)
+        print(f"Diagnostics: {v2_diagnostics_path}")
+
+    print(
+        f"{league.display_name}: V2.2 readiness threshold="
+        f"{args.ready_threshold:.1%}; CP ratio is a buildability heuristic, not IV simulation."
+    )
+    print("THEORETICAL:")
+    _print_move_aware_teams(theoretical, args.results)
+    print("READY NOW:")
+    if ready_evaluations:
+        _print_move_aware_teams(ready_evaluations, args.results)
+    else:
+        print("  none — fewer than three distinct ready-now species form a legal team")
+    print("POWER-UP NEEDED:")
+    if power_up_evaluations:
+        for rank, evaluation in enumerate(power_up_evaluations[: args.results], 1):
+            names = " / ".join(member.name for member in evaluation.members)
+            gaps = ", ".join(
+                f"{name} CP {actual}→{target} (+{gap})"
+                for name, actual, target, gap in team_power_up_gaps(
+                    evaluation.members, diagnostics
+                )
+            )
+            print(
+                f"  {rank:>2}. {names} | {evaluation.score.total_score:.4f} "
+                f"| {gaps}"
+            )
+    else:
+        print("  none")
+    print(f"Ready-now results: {ready_path}")
+    print(f"Power-up-needed results: {power_path}")
+    print(f"Theoretical results: {theoretical_path}")
+    print(f"Inventory diagnostics: {diagnostics_path}")
+    print(f"Theoretical Top {min(args.results, 10)} buildability:")
+    for team_rank, evaluation in enumerate(theoretical[: min(args.results, 10)], 1):
+        reasons = team_buildability_reasons(evaluation.members, owned, diagnostics)
+        print(f"  #{team_rank}: {'; '.join(reasons)}")
+    return 0
+
+
+def _print_move_aware_teams(evaluations, limit: int) -> None:
+    for rank, evaluation in enumerate(evaluations[:limit], 1):
+        names = " / ".join(member.name for member in evaluation.members)
+        print(f"  {rank:>2}. {names} | {evaluation.score.total_score:.4f}")
 
 
 if __name__ == "__main__":
