@@ -1,0 +1,4 @@
+{
+  "pokemon": {"妙蛙種子":"bulbasaur", "小火龍":"charmander", "傑尼龜":"squirtle"},
+  "moves": {"藤鞭":"VINE_WHIP", "火花":"EMBER", "水槍":"WATER_GUN", "種子炸彈":"SEED_BOMB", "污泥炸彈":"SLUDGE_BOMB", "蓄能焰襲":"FLAME_CHARGE", "衝浪":"SURF", "冰凍光束":"ICE_BEAM"}
+}

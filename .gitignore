@@ -12,5 +12,11 @@ build/
 
 # 原始排名資料與產出結果不納入版本控制。
 data/*/*.csv
+data/cache/
 results/*/*.csv
 results/*/*.json
+
+# 可提交的小型庫存範例（真實個人庫存請勿提交）。
+!data/inventory/
+data/inventory/*.csv
+!data/inventory/great_league.example.csv

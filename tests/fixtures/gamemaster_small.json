@@ -1,0 +1,18 @@
+{
+  "moves": [
+    {"moveId":"VINE_WHIP","name":"Vine Whip","type":"grass","power":5,"energy":0,"energyGain":8,"cooldown":500},
+    {"moveId":"EMBER","name":"Ember","type":"fire","power":7,"energy":0,"energyGain":6,"cooldown":500},
+    {"moveId":"WATER_GUN","name":"Water Gun","type":"water","power":5,"energy":0,"energyGain":5,"cooldown":500},
+    {"moveId":"SEED_BOMB","name":"Seed Bomb","type":"grass","power":60,"energy":40,"energyGain":0},
+    {"moveId":"SLUDGE_BOMB","name":"Sludge Bomb","type":"poison","power":80,"energy":50,"energyGain":0},
+    {"moveId":"FLAME_CHARGE","name":"Flame Charge","type":"fire","power":65,"energy":50,"energyGain":0,"buffs":[1,0],"buffTarget":"self","buffApplyChance":"1"},
+    {"moveId":"SURF","name":"Surf","type":"water","power":75,"energy":45,"energyGain":0},
+    {"moveId":"ICE_BEAM","name":"Ice Beam","type":"ice","power":90,"energy":55,"energyGain":0}
+  ],
+  "pokemon": [
+    {"speciesId":"bulbasaur","speciesName":"Bulbasaur","types":["grass","poison"],"fastMoves":["VINE_WHIP"],"chargedMoves":["SEED_BOMB","SLUDGE_BOMB"]},
+    {"speciesId":"bulbasaur_shadow","speciesName":"Bulbasaur (Shadow)","types":["grass","poison"],"fastMoves":["VINE_WHIP"],"chargedMoves":["SEED_BOMB","SLUDGE_BOMB"]},
+    {"speciesId":"charmander","speciesName":"Charmander","types":["fire"],"fastMoves":["EMBER"],"chargedMoves":["FLAME_CHARGE"]},
+    {"speciesId":"squirtle","speciesName":"Squirtle","types":["water"],"fastMoves":["WATER_GUN"],"chargedMoves":["SURF","ICE_BEAM"]}
+  ]
+}

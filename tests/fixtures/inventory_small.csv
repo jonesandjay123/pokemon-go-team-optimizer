@@ -1,0 +1,5 @@
+instance_id,pokemon_name,form,shadow,cp,fast_move,charged_move_1,charged_move_2,notes
+owned-grass,妙蛙種子,,false,1498,藤鞭,種子炸彈,,only one charged move
+owned-fire,小火龍,,false,1200,火花,蓄能焰襲,,
+owned-water,傑尼龜,,false,1499,水槍,冰凍光束,衝浪,actual order differs
+owned-shadow,妙蛙種子,,true,1490,藤鞭,種子炸彈,污泥炸彈,

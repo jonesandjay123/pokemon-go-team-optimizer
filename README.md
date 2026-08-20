@@ -3,7 +3,7 @@
 一個實驗性的 Pokémon GO PvP 隊伍最佳化引擎，目標是從排名資料、屬性相剋、招式配置與對戰模擬中，找出 Great League、Ultra League 與 Master League 裡穩定且互補的三隻寶可夢組合。
 
 > [!WARNING]
-> V1 只評估 PvPoke 排名與寶可夢的**防守屬性**，尚未考慮實際招式屬性、傷害、能量、對戰模擬、盾數或隊伍出場順序。輸出適合拿來檢查評分模型，不應直接視為實戰勝率排名。
+> V2 已加入實際招式屬性與進攻 coverage，但仍不是戰鬥模擬器；尚未計算傷害量、出招時間、盾、CMP、IV 或隊伍順序。輸出適合比較透明的隊伍結構，不應直接視為實戰勝率排名。
 
 ## 為什麼做這個專案
 
@@ -83,6 +83,69 @@ pogo-team-optimizer \
   --output /tmp/top_teams.csv
 ```
 
+## V2：招式感知的進攻 Coverage
+
+V2 保留全部 V1／V1.1 指令與公式，另外用獨立的 `--scoring v2` 模型加入：
+
+- 進攻招式屬性的種類數
+- 對 18 種單屬性目標的效果絕佳／普通／抵抗分類
+- 快速招式與蓄力招式各自的效果絕佳 coverage
+- 每位隊員是否至少有一個 STAB 招式
+- 隊友招式屬性的 pairwise Jaccard 重複度
+- 防守分數與進攻 coverage 的平衡度
+
+每一項都會個別寫入 CSV；總分只是這些公開元件的固定加權，不會執行完整 PvPoke 對戰模擬。
+
+先下載並快取 PvPoke 的 GameMaster 與排名 JSON（`data/cache/` 已由 Git 排除）：
+
+```bash
+python -m pogo_team_optimizer.data_sources --league great
+```
+
+執行真實 Great League Top 50：
+
+```bash
+pogo-team-optimizer \
+  --league great \
+  --top 50 \
+  --input data/cache/rankings-1500.json \
+  --scoring v2 \
+  --diagnostics
+```
+
+`--diagnostics` 會另外寫出 `v2_diagnostics.json`，包含 V2 Top 10、和五個 V1/V1.1 模型的重疊、寶可夢頻率變化、Steel/Flying 出現率、coverage 分布，以及成員最佳隊伍名次升降。
+
+GameMaster 是招式 ID、英文顯示名稱、屬性、快速／蓄力分類、power、energy、energy gain 與 buff/debuff 的權威來源。資料匯入模組與最佳化器分離。若使用中文排名 CSV，可用 `--aliases aliases.json` 提供可驗證的本地化名稱對照；無法解析或招式不屬於該形態時會逐列報告，不會靜默刪除。
+
+### 理論模式與庫存模式
+
+理論模式使用 PvPoke 的建議 moveset。庫存模式則把**完整排名池**先和使用者實際擁有的個體取交集，再枚舉這個縮小後的可行組合；因此即使可用寶可夢在第 50 名之後，也不會因 `--top 50` 而停止尋找。`--top` 只界定用來比較的理論候選池。
+
+```bash
+pogo-team-optimizer \
+  --league great \
+  --top 50 \
+  --input data/cache/rankings-1500.json \
+  --inventory data/inventory/great_league.csv \
+  --scoring v2 \
+  --results 10
+```
+
+庫存模式會用 CSV 中的**實際招式**評分，不會假設擁有該寶可夢就等於擁有 PvPoke 建議招式。它會分別回報 battle-ready、招式不同、缺少招式、形態不符與不在排名中；一個只解鎖第一蓄力招式的個體也可評分。
+
+庫存 CSV 每一列代表一個實際個體：
+
+```csv
+instance_id,pokemon_name,form,shadow,cp,fast_move,charged_move_1,charged_move_2,notes
+my-001,Bulbasaur,,false,1498,Vine Whip,Seed Bomb,,only one charged move
+```
+
+可複製 [data/inventory/great_league.example.csv](data/inventory/great_league.example.csv) 開始填寫。請將真實檔案命名為 `great_league.csv`；該檔會被 Git 忽略，避免提交個人庫存。
+
+### V2 限制
+
+目前 coverage 只回答「招式屬性最多能打到何種倍率」，不考慮招式傷害、能量效率、出招節奏、盾、CMP、Lead／Safe Swap／Closer、TM 經濟、星塵糖果成本或 IV-specific matchup。同樣具有 coverage 的兩個招式不代表實戰價值相等，這些屬於後續 battle-simulation 里程碑。
+
 ## V1 資料管線
 
 ```text
@@ -101,7 +164,7 @@ PvPoke／PvPokeTW CSV
 
 ## 資料來源
 
-預計使用下列資料來源：
+使用下列資料來源：
 
 - [PvPoke 排名](https://pvpoke.com/rankings/)：候選寶可夢、排名與建議招式
 - [PvPoke Game Master](https://github.com/pvpoke/pvpoke/blob/master/src/data/gamemaster.json)：寶可夢與招式資料
@@ -248,7 +311,7 @@ pogo-team-optimizer --league great --top 50 --compare-scoring
 
 - [x] V1：修正 PvPokeTW CSV 欄位、取前 N 名、建立屬性矩陣、窮舉三人組並輸出 Top teams
 - [x] V1.1：比較五種固定防守評分模型的敏感度、結構偏誤與 ranking stability
-- [ ] V2：把實際招式屬性與進攻 coverage 納入評分
+- [x] V2：把實際招式屬性、進攻 coverage 與庫存限制納入評分
 - [ ] V3：建立或匯入 Pokémon 之間的 matchup matrix
 - [ ] V4：以平均值、最差情境與變異程度衡量隊伍 robustness
 - [ ] V5：分析 Lead、Safe Swap、Closer 的排列方式

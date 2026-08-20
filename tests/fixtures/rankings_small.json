@@ -1,0 +1,6 @@
+[
+  {"speciesId":"bulbasaur","speciesName":"Bulbasaur","score":95,"stats":{"atk":100,"def":120,"hp":140},"moveset":["VINE_WHIP","SEED_BOMB","SLUDGE_BOMB"]},
+  {"speciesId":"charmander","speciesName":"Charmander","score":92,"stats":{"atk":110,"def":100,"hp":120},"moveset":["EMBER","FLAME_CHARGE"]},
+  {"speciesId":"squirtle","speciesName":"Squirtle","score":90,"stats":{"atk":100,"def":125,"hp":135},"moveset":["WATER_GUN","SURF","ICE_BEAM"]},
+  {"speciesId":"bulbasaur_shadow","speciesName":"Bulbasaur (Shadow)","score":88,"stats":{"atk":100,"def":120,"hp":140},"moveset":["VINE_WHIP","SEED_BOMB","SLUDGE_BOMB"]}
+]

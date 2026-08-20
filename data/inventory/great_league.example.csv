@@ -1,0 +1,4 @@
+instance_id,pokemon_name,form,shadow,cp,fast_move,charged_move_1,charged_move_2,notes
+example-001,Bulbasaur,,false,1498,Vine Whip,Seed Bomb,,one charged move unlocked
+example-002,Charmander,,false,1200,Ember,Flame Charge,,replace with your actual inventory
+example-003,Squirtle,,false,1499,Water Gun,Surf,Ice Beam,
