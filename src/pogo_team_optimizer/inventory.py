@@ -15,6 +15,7 @@ from pogo_team_optimizer.readiness import (
     ReadinessConfig,
     ReadinessStatus,
     assess_readiness,
+    assess_unknown_moves_readiness,
 )
 
 
@@ -29,6 +30,12 @@ class InventoryStatus(StrEnum):
     WRONG_FORM = "wrong-form"
     INELIGIBLE_CP = "ineligible-cp"
     SPECIES_NOT_RANKED = "species-not-ranked"
+
+
+class InventoryMoveState(StrEnum):
+    KNOWN = "moves-known"
+    UNKNOWN = "moves-unknown"
+    INVALID = "moves-invalid"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +53,7 @@ class InventoryDiagnostic:
     move_quality_delta: float | None = None
     second_charged_move_missing: bool = False
     readiness: ReadinessAssessment | None = None
+    move_state: InventoryMoveState | None = None
 
 
 def _boolean(value: str) -> bool:
@@ -84,12 +92,18 @@ def read_inventory(path: Path | str) -> list[InventoryPokemon]:
             def optional(key: str) -> str | None:
                 return (row.get(key) or "").strip() or None
 
+            declared_move_state = optional("move_state")
+            if declared_move_state not in {None, "known", "unknown"}:
+                raise InventoryError(
+                    f"第 {row_number} 列 move_state 必須是 known、unknown 或留白"
+                )
             result.append(
                 InventoryPokemon(
                     instance_id, pokemon_name, optional("form"),
                     _boolean(row["shadow"]), cp, optional("fast_move"),
                     optional("charged_move_1"), optional("charged_move_2"),
                     optional("notes") or "",
+                    declared_move_state,
                 )
             )
     return result
@@ -101,6 +115,7 @@ def inventory_candidates(
     game_master: GameMaster,
     cp_cap: int | None = None,
     readiness_config: ReadinessConfig = DEFAULT_READINESS_CONFIG,
+    scout_mode: bool = False,
 ) -> tuple[list[PokemonCandidate], list[InventoryDiagnostic]]:
     """Intersect all rankings with owned instances, then apply actual moves."""
     ranked_by_id = {candidate.species_id: candidate for candidate in rankings}
@@ -109,6 +124,17 @@ def inventory_candidates(
     readiness_cap = cp_cap or 10_000
     for owned in inventory:
         raw_actual_moves = owned.move_names
+        inferred_unknown = not owned.fast_move or not owned.charged_move_1
+        if owned.declared_move_state == "unknown":
+            move_state = InventoryMoveState.UNKNOWN
+        elif inferred_unknown:
+            move_state = (
+                InventoryMoveState.INVALID
+                if owned.declared_move_state == "known"
+                else InventoryMoveState.UNKNOWN
+            )
+        else:
+            move_state = InventoryMoveState.KNOWN
         label = owned.pokemon_name
         if owned.form:
             label = f"{label}_{owned.form}"
@@ -129,6 +155,7 @@ def inventory_candidates(
                             readiness_config,
                             ReadinessStatus.MISSING_SPECIES_FORM,
                         ),
+                        move_state=move_state,
                     )
                 )
                 continue
@@ -148,6 +175,7 @@ def inventory_candidates(
                             readiness_config,
                             ReadinessStatus.MISSING_SPECIES_FORM,
                         ),
+                        move_state=move_state,
                     )
                 )
                 continue
@@ -176,6 +204,7 @@ def inventory_candidates(
                         readiness_config,
                         ReadinessStatus.MISSING_SPECIES_FORM,
                     ),
+                    move_state=move_state,
                 )
             )
             continue
@@ -198,22 +227,111 @@ def inventory_candidates(
                         readiness_config,
                         ReadinessStatus.INELIGIBLE_OVER_CAP,
                     ),
+                    move_state=move_state,
                 )
             )
             continue
-        if not owned.fast_move or not owned.charged_move_1:
+        if move_state is InventoryMoveState.UNKNOWN:
+            try:
+                provided_fast = (
+                    game_master.resolve_move(owned.fast_move, MoveKind.FAST)
+                    if owned.fast_move
+                    else None
+                )
+                provided_charged = tuple(
+                    game_master.resolve_move(move, MoveKind.CHARGED)
+                    for move in (owned.charged_move_1, owned.charged_move_2)
+                    if move
+                )
+                metadata = game_master.pokemon_by_id[species_id]
+                provided_moves_are_legal = (
+                    provided_fast is None
+                    or provided_fast.move_id in metadata.fast_move_ids
+                ) and all(
+                    move.move_id in metadata.charged_move_ids
+                    for move in provided_charged
+                )
+                if not provided_moves_are_legal:
+                    raise MoveResolutionError(
+                        "已填寫的招式不在該形態的 GameMaster 招式池"
+                    )
+            except MoveResolutionError as error:
+                diagnostics.append(
+                    InventoryDiagnostic(
+                        owned.instance_id,
+                        InventoryStatus.MISSING_MOVE,
+                        str(error),
+                        species_id=species_id,
+                        team_species_key=theoretical.team_species_key,
+                        actual_moves=raw_actual_moves,
+                        recommended_moves=tuple(
+                            move.name for move in theoretical.recommended_moves
+                        ),
+                        readiness=assess_readiness(
+                            owned.cp,
+                            theoretical.ranking.cp,
+                            readiness_cap,
+                            readiness_config,
+                            ReadinessStatus.INVALID_MISSING_MOVE,
+                        ),
+                        move_state=InventoryMoveState.INVALID,
+                    )
+                )
+                continue
+            readiness = assess_unknown_moves_readiness(
+                owned.cp,
+                theoretical.ranking.cp,
+                readiness_cap,
+                readiness_config,
+            )
+            recommended_quality = score_moveset_quality(
+                theoretical.fast_move, theoretical.charged_moves
+            )
             diagnostics.append(
                 InventoryDiagnostic(
                     owned.instance_id,
                     InventoryStatus.MISSING_MOVE,
-                    "缺少快速招式或第一個蓄力招式",
+                    "招式尚未記錄；Scout 可暫用 PvPoke 推薦招式",
                     species_id=species_id,
                     team_species_key=theoretical.team_species_key,
                     actual_moves=raw_actual_moves,
                     recommended_moves=tuple(
                         move.name for move in theoretical.recommended_moves
                     ),
-                    second_charged_move_missing=not owned.charged_move_2,
+                    moveset_match="assumed-recommended" if scout_mode else None,
+                    recommended_move_quality=recommended_quality.total_score,
+                    second_charged_move_missing=False,
+                    readiness=readiness,
+                    move_state=InventoryMoveState.UNKNOWN,
+                )
+            )
+            if scout_mode:
+                output.append(
+                    PokemonCandidate(
+                        theoretical.ranking,
+                        species_id,
+                        theoretical.team_species_key,
+                        theoretical.fast_move,
+                        theoretical.charged_moves,
+                        owned.instance_id,
+                        theoretical.fast_move,
+                        theoretical.charged_moves,
+                        True,
+                    )
+                )
+            continue
+        if move_state is InventoryMoveState.INVALID:
+            diagnostics.append(
+                InventoryDiagnostic(
+                    owned.instance_id,
+                    InventoryStatus.MISSING_MOVE,
+                    "move_state=known，但缺少快速招式或第一個蓄力招式",
+                    species_id=species_id,
+                    team_species_key=theoretical.team_species_key,
+                    actual_moves=raw_actual_moves,
+                    recommended_moves=tuple(
+                        move.name for move in theoretical.recommended_moves
+                    ),
                     readiness=assess_readiness(
                         owned.cp,
                         theoretical.ranking.cp,
@@ -221,6 +339,7 @@ def inventory_candidates(
                         readiness_config,
                         ReadinessStatus.INVALID_MISSING_MOVE,
                     ),
+                    move_state=InventoryMoveState.INVALID,
                 )
             )
             continue
@@ -250,6 +369,7 @@ def inventory_candidates(
                         readiness_config,
                         ReadinessStatus.INVALID_MISSING_MOVE,
                     ),
+                    move_state=InventoryMoveState.INVALID,
                 )
             )
             continue
@@ -275,6 +395,7 @@ def inventory_candidates(
                         readiness_config,
                         ReadinessStatus.INVALID_MISSING_MOVE,
                     ),
+                    move_state=InventoryMoveState.INVALID,
                 )
             )
             continue
@@ -323,6 +444,7 @@ def inventory_candidates(
                     readiness_cap,
                     readiness_config,
                 ),
+                InventoryMoveState.KNOWN,
             )
         )
         output.append(actual)
@@ -361,7 +483,15 @@ def team_buildability_reasons(
                 details.append("ready now")
             elif ReadinessStatus.POWER_UP_NEEDED in readiness_statuses:
                 details.append("power-up needed")
-            if any(item.moveset_match != "exact" for item in matching_diagnostics):
+            elif ReadinessStatus.NEEDS_MOVE_CHECK in readiness_statuses:
+                details.append("needs move check")
+            elif ReadinessStatus.POWER_UP_AND_MOVE_CHECK in readiness_statuses:
+                details.append("power-up + move check")
+            if any(
+                item.move_state is InventoryMoveState.KNOWN
+                and item.moveset_match != "exact"
+                for item in matching_diagnostics
+            ):
                 details.append("actual moves differ")
             if any(item.second_charged_move_missing for item in matching_diagnostics):
                 details.append("second charged move missing")
@@ -414,5 +544,8 @@ def team_power_up_gaps(
         for candidate in team
         if candidate.instance_id is not None
         and (assessment := assessments[candidate.instance_id]).status
-        is ReadinessStatus.POWER_UP_NEEDED
+        in {
+            ReadinessStatus.POWER_UP_NEEDED,
+            ReadinessStatus.POWER_UP_AND_MOVE_CHECK,
+        }
     )

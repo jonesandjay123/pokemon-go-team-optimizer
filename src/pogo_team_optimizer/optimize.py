@@ -17,7 +17,9 @@ from pogo_team_optimizer.inventory import (
     team_power_up_gaps,
 )
 from pogo_team_optimizer.output import (
+    write_inspection_priorities,
     write_inventory_diagnostics,
+    write_scout_teams,
     write_top_teams,
     write_v2_top_teams,
 )
@@ -36,6 +38,10 @@ from pogo_team_optimizer.search_v2 import rank_v2_teams
 from pogo_team_optimizer.readiness import (
     DEFAULT_READINESS_CONFIG,
     ReadinessConfig,
+)
+from pogo_team_optimizer.scout import (
+    provisional_team_classification,
+    rank_move_inspection_priorities,
 )
 from pogo_team_optimizer.v2_diagnostics import build_v2_diagnostics
 from pogo_team_optimizer.sensitivity import (
@@ -109,6 +115,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="write full move-aware versus V1/V1.1 diagnostics",
     )
     parser.add_argument(
+        "--scout",
+        action="store_true",
+        help="provisionally score unknown moves with PvPoke recommendations (V2.2)",
+    )
+    parser.add_argument(
         "--compare-scoring",
         action="store_true",
         help="run all V1/V1.1 scoring configurations and write comparison outputs",
@@ -133,6 +144,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("--diagnostics requires move-aware scoring")
     if args.compare_scoring and args.scoring in {"v2", "v2.1", "v2.2"}:
         parser.error("--compare-scoring is for V1/V1.1; use --diagnostics with V2")
+    if args.scout and (args.scoring != "v2.2" or not args.inventory):
+        parser.error("--scout requires --scoring v2.2 and --inventory")
 
     league = get_league(args.league)
     input_path = args.input or (
@@ -251,18 +264,22 @@ def _run_v2(
     inventory_evaluations = None
     ready_evaluations = []
     power_up_evaluations = []
+    scout_evaluations = []
+    inspection_priorities = []
     diagnostics = []
     if args.inventory:
         try:
             all_candidates, all_unresolved = resolve_ranking_entries(
                 all_entries, game_master, species_ids
             )
+            inventory_records = read_inventory(args.inventory)
             owned, diagnostics = inventory_candidates(
-                read_inventory(args.inventory),
+                inventory_records,
                 all_candidates,
                 game_master,
                 league.cp_cap,
                 readiness_config,
+                scout_mode=args.scout,
             )
         except (InventoryError, MoveResolutionError, ValueError) as error:
             parser.error(str(error))
@@ -270,9 +287,14 @@ def _run_v2(
             print(f"Full-pool unresolved rows: {len(all_unresolved)}", file=sys.stderr)
         if len(owned) < 3:
             parser.error(f"庫存中只有 {len(owned)} 隻可評分候選，至少需要 3 隻")
-        inventory_evaluations = rank_v2_teams(owned, scoring=args.scoring)
+        strict_owned = [candidate for candidate in owned if not candidate.moves_provisional]
+        inventory_evaluations = (
+            rank_v2_teams(strict_owned, scoring=args.scoring)
+            if len(strict_owned) >= 3
+            else []
+        )
         if args.scoring == "v2.2":
-            ready = ready_now_candidates(owned, diagnostics)
+            ready = ready_now_candidates(strict_owned, diagnostics)
             ready_evaluations = (
                 rank_v2_teams(ready, scoring=args.scoring) if len(ready) >= 3 else []
             )
@@ -281,6 +303,18 @@ def _run_v2(
                 for evaluation in inventory_evaluations
                 if team_power_up_gaps(evaluation.members, diagnostics)
             ]
+            if args.scout:
+                scout_evaluations = [
+                    evaluation
+                    for evaluation in rank_v2_teams(owned, scoring=args.scoring)
+                    if any(member.moves_provisional for member in evaluation.members)
+                ]
+                inspection_priorities = rank_move_inspection_priorities(
+                    owned,
+                    scout_evaluations,
+                    inventory_records,
+                    diagnostics,
+                )
 
     if args.scoring == "v2.2" and args.inventory:
         return _write_and_report_v22_inventory(
@@ -294,6 +328,8 @@ def _run_v2(
             diagnostics,
             ready_evaluations,
             power_up_evaluations,
+            scout_evaluations,
+            inspection_priorities,
         )
 
     evaluations = inventory_evaluations or theoretical
@@ -382,6 +418,8 @@ def _write_and_report_v22_inventory(
     diagnostics,
     ready_evaluations,
     power_up_evaluations,
+    scout_evaluations,
+    inspection_priorities,
 ) -> int:
     assessments = readiness_by_instance(diagnostics)
     if args.output:
@@ -417,6 +455,11 @@ def _write_and_report_v22_inventory(
     )
     diagnostics_path = output_directory / "inventory_diagnostics.csv"
     write_inventory_diagnostics(diagnostics_path, diagnostics)
+    if args.scout:
+        scout_path = output_directory / "inventory_scout_teams.csv"
+        priority_path = output_directory / "inventory_move_check_priority.csv"
+        write_scout_teams(scout_path, scout_evaluations, diagnostics, limit)
+        write_inspection_priorities(priority_path, inspection_priorities)
     if args.diagnostics:
         v2_diagnostics_path = output_directory / "v2_diagnostics.json"
         summary = build_v2_diagnostics(
@@ -455,6 +498,35 @@ def _write_and_report_v22_inventory(
             )
     else:
         print("  none")
+    if args.scout:
+        print("TOP PROVISIONAL TEAMS:")
+        if scout_evaluations:
+            for rank, evaluation in enumerate(scout_evaluations[: args.results], 1):
+                names = " / ".join(member.name for member in evaluation.members)
+                assumed = ", ".join(
+                    member.instance_id or member.name
+                    for member in evaluation.members
+                    if member.moves_provisional
+                )
+                classification = provisional_team_classification(
+                    evaluation.members, diagnostics
+                ).value
+                print(
+                    f"  {rank:>2}. {names} | {evaluation.score.total_score:.4f} "
+                    f"| {classification} | PROVISIONAL assumed recommended: {assumed}"
+                )
+        else:
+            print("  none")
+        print("TOP POKÉMON TO CHECK NEXT:")
+        for rank, item in enumerate(inspection_priorities[:15], 1):
+            print(
+                f"  {rank:>2}. {item.pokemon_name} [{item.instance_id}] "
+                f"CP {item.cp} | priority={item.inspection_priority:.4f} | "
+                f"top-team count={item.top_team_frequency}, "
+                f"best provisional rank={item.best_provisional_team_rank or 'n/a'}"
+            )
+        print(f"Scout teams: {scout_path}")
+        print(f"Move-check priority: {priority_path}")
     print(f"Ready-now results: {ready_path}")
     print(f"Power-up-needed results: {power_path}")
     print(f"Theoretical results: {theoretical_path}")

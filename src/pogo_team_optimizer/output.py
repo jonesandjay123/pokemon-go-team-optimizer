@@ -8,6 +8,10 @@ from pogo_team_optimizer.search import TeamEvaluation
 from pogo_team_optimizer.search_v2 import V2TeamEvaluation
 from pogo_team_optimizer.inventory import InventoryDiagnostic
 from pogo_team_optimizer.readiness import ReadinessAssessment
+from pogo_team_optimizer.scout import (
+    InspectionPriority,
+    provisional_team_classification,
+)
 
 
 RESULT_FIELDS = (
@@ -80,6 +84,7 @@ V2_RESULT_FIELDS = (
     "readiness_status_2", "target_cp_source_2",
     "actual_cp_3", "target_cp_3", "cp_gap_3", "readiness_ratio_3",
     "readiness_status_3", "target_cp_source_3",
+    "move_source_1", "move_source_2", "move_source_3", "team_provisional",
 )
 
 
@@ -136,6 +141,9 @@ def write_v2_top_teams(
                     f"{raw_score.move_quality_adjustment:.6f}"
                     if has_move_quality else ""
                 ),
+                "team_provisional": any(
+                    member.moves_provisional for member in members
+                ),
             }
             for index, member in enumerate(members, 1):
                 assessment = (
@@ -157,6 +165,11 @@ def write_v2_top_teams(
                         f"target_cp_source_{index}": (
                             assessment.target_source.value if assessment else ""
                         ),
+                        f"move_source_{index}": (
+                            "assumed-pvpoke-recommended"
+                            if member.moves_provisional
+                            else "actual"
+                        ),
                     }
                 )
             writer.writerow(row)
@@ -169,6 +182,7 @@ INVENTORY_DIAGNOSTIC_FIELDS = (
     "second_charged_move_missing", "message",
     "actual_cp", "target_cp", "cp_gap", "readiness_ratio",
     "readiness_status", "target_cp_source",
+    "move_state",
 )
 
 
@@ -216,5 +230,107 @@ def write_inventory_diagnostics(
                     "target_cp_source": (
                         item.readiness.target_source.value if item.readiness else ""
                     ),
+                    "move_state": item.move_state.value if item.move_state else "",
+                }
+            )
+
+
+SCOUT_TEAM_FIELDS = (
+    "provisional_rank", "classification", "pokemon_1", "pokemon_2",
+    "pokemon_3", "instance_1", "instance_2", "instance_3", "total_score",
+    "assumed_recommended_instances", "power_up_gaps", "provisional",
+)
+
+
+def write_scout_teams(
+    path: Path | str,
+    evaluations: Sequence[V2TeamEvaluation],
+    diagnostics: Sequence[InventoryDiagnostic],
+    limit: int = 50,
+) -> None:
+    from pogo_team_optimizer.inventory import team_power_up_gaps
+
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=SCOUT_TEAM_FIELDS)
+        writer.writeheader()
+        for rank, evaluation in enumerate(evaluations[:limit], 1):
+            members = evaluation.members
+            assumed = [
+                member.instance_id or member.name
+                for member in members
+                if member.moves_provisional
+            ]
+            gaps = team_power_up_gaps(members, diagnostics)
+            writer.writerow(
+                {
+                    "provisional_rank": rank,
+                    "classification": provisional_team_classification(
+                        members, diagnostics
+                    ).value,
+                    **{
+                        f"pokemon_{index}": member.name
+                        for index, member in enumerate(members, 1)
+                    },
+                    **{
+                        f"instance_{index}": member.instance_id or ""
+                        for index, member in enumerate(members, 1)
+                    },
+                    "total_score": f"{evaluation.score.total_score:.4f}",
+                    "assumed_recommended_instances": "|".join(assumed),
+                    "power_up_gaps": "|".join(
+                        f"{name}:{actual}->{target}:+{gap}"
+                        for name, actual, target, gap in gaps
+                    ),
+                    "provisional": True,
+                }
+            )
+
+
+INSPECTION_PRIORITY_FIELDS = (
+    "priority_rank", "instance_id", "pokemon", "species_id", "form",
+    "shadow", "cp", "source_rank", "readiness_status",
+    "top_team_frequency", "best_provisional_team_score",
+    "best_provisional_team_rank", "actual_moves_known", "frequency_score",
+    "placement_score", "source_rank_score", "readiness_score",
+    "inspection_priority",
+)
+
+
+def write_inspection_priorities(
+    path: Path | str, priorities: Sequence[InspectionPriority]
+) -> None:
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8-sig", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=INSPECTION_PRIORITY_FIELDS)
+        writer.writeheader()
+        for rank, item in enumerate(priorities, 1):
+            writer.writerow(
+                {
+                    "priority_rank": rank,
+                    "instance_id": item.instance_id,
+                    "pokemon": item.pokemon_name,
+                    "species_id": item.species_id,
+                    "form": item.form or "",
+                    "shadow": item.shadow,
+                    "cp": item.cp,
+                    "source_rank": item.source_rank,
+                    "readiness_status": item.readiness_status.value,
+                    "top_team_frequency": item.top_team_frequency,
+                    "best_provisional_team_score": (
+                        f"{item.best_provisional_team_score:.4f}"
+                        if item.best_provisional_team_score is not None else ""
+                    ),
+                    "best_provisional_team_rank": (
+                        item.best_provisional_team_rank or ""
+                    ),
+                    "actual_moves_known": item.actual_moves_known,
+                    "frequency_score": f"{item.frequency_score:.6f}",
+                    "placement_score": f"{item.placement_score:.6f}",
+                    "source_rank_score": f"{item.source_rank_score:.6f}",
+                    "readiness_score": f"{item.readiness_score:.6f}",
+                    "inspection_priority": f"{item.inspection_priority:.6f}",
                 }
             )

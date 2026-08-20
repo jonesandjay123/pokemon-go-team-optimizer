@@ -15,6 +15,7 @@ FIELDS = (
     "charged_move_1",
     "charged_move_2",
     "notes",
+    "move_state",
 )
 
 
@@ -28,6 +29,7 @@ EXAMPLE = {
     "charged_move_1": "目前實際第一蓄力招式",
     "charged_move_2": "未解鎖可留白",
     "notes": "選填備註；不需要 IV",
+    "move_state": "known 或 unknown；留白時由招式欄推斷",
 }
 
 
@@ -60,6 +62,7 @@ def main() -> int:
     print(f"已建立：{args.output}")
     print("每一列必須是一隻實際個體；第二蓄力招未解鎖時留白。")
     print("請刪除或取代範例說明列，再執行 --inventory。IV 目前不需要。")
+    print("尚未檢查招式可填 move_state=unknown，並使用 --scout 產生盤點優先順序。")
     return 0
 
 

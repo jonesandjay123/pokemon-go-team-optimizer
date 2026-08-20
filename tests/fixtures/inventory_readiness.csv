@@ -4,4 +4,4 @@ low-fire,小火龍,,false,900,火花,蓄能焰襲,,owned but needs powering up
 ready-fire,小火龍,,false,1460,火花,蓄能焰襲,,ready alternative instance
 ready-water,傑尼龜,,false,1495,水槍,衝浪,冰凍光束,ready now
 over-shadow,妙蛙種子,,true,1600,藤鞭,種子炸彈,污泥炸彈,illegal over cap
-invalid-shadow,妙蛙種子,,true,1490,,種子炸彈,污泥炸彈,missing fast move
+invalid-shadow,妙蛙種子,,true,1490,不存在的招式,種子炸彈,污泥炸彈,invalid named fast move

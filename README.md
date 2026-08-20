@@ -248,6 +248,47 @@ pogo-team-optimizer \
 
 CP ratio **不是**精確戰力模型，也不是 IV-specific battle simulation。它只用來判斷「已接近預定 build」或「還需要強化」；實際 IV、Stardust／糖果成本、盾、對戰模擬與出場順序仍屬未來里程碑。
 
+## V2.2a：Inventory Scout Mode
+
+Scout Mode 讓尚未逐隻抄完招式的真實庫存先用於候選探索，不會改動任何 V1～V2.2 評分或 Ready Now 規則。
+
+庫存招式狀態分為：
+
+- `moves-known`：fast move 與 charged move 1 已填寫，使用實際招式嚴格驗證與評分。
+- `moves-unknown`：招式尚未檢查；只有 Scout Mode 可以暫用 PvPoke recommended moveset。
+- `moves-invalid`：已填入的招式名稱無法解析、不是正確類別，或不屬於該 form；Scout 不會替換這種錯誤。
+
+CSV 可增加選填欄位 `move_state`，值為 `known`、`unknown` 或留白。留白時，fast move 或 charged move 1 空白會推斷為 unknown；charged move 2 單獨留白仍表示「已知只有一個蓄力招式」，維持 V2.1 的合法語意。
+
+```bash
+pogo-team-optimizer \
+  --league great \
+  --top 50 \
+  --input data/cache/rankings-1500.json \
+  --inventory data/inventory/great_league.csv \
+  --scoring v2.2 \
+  --scout \
+  --results 15
+```
+
+Scout 使用推薦招式建立的候選與隊伍都會明確標記 `PROVISIONAL`／`assumed-pvpoke-recommended`，不會寫回庫存，也永遠不會混入 Ready Now。填入實際招式後，下次執行會自動回到 V2.1/V2.2 的 actual-move scoring。
+
+額外輸出：
+
+- `inventory_scout_teams.csv`：至少含一個 moves-unknown 個體的 provisional teams，分為 `needs-move-check` 與 `power-up+move-check`。
+- `inventory_move_check_priority.csv`：最值得先打開 Pokémon GO 檢查招式的個體排序。
+
+Move-inspection priority 使用固定、可拆解公式，沒有 species-specific bonus：
+
+```text
+priority = 0.40 × frequency_in_top_50_provisional_teams
+         + 0.30 × best_provisional_team_placement
+         + 0.20 × normalized_PvPoke_source_rank
+         + 0.10 × CP_readiness
+```
+
+Priority 報表包含 instance、species/form/Shadow、CP、PvPoke source rank、readiness、Top provisional team 出現次數、最佳 provisional score／rank，以及 actual moves 是否已知。用途只是在回答「下一批先檢查哪 10～15 隻」，provisional score 不是實際 moveset 的承諾。
+
 ## V1 資料管線
 
 ```text
@@ -416,6 +457,7 @@ pogo-team-optimizer --league great --top 50 --compare-scoring
 - [x] V2：把實際招式屬性、進攻 coverage 與庫存限制納入評分
 - [x] V2.1：實施 GBL species clause、實際 moveset 品質修正與庫存診斷
 - [x] V2.2：區分 ready-now 與 power-up-needed，輸出 CP 強化差距
+- [x] V2.2a：以 provisional recommended moves 探索未完成招式盤點的庫存
 - [ ] V3：建立或匯入 Pokémon 之間的 matchup matrix
 - [ ] V4：以平均值、最差情境與變異程度衡量隊伍 robustness
 - [ ] V5：分析 Lead、Safe Swap、Closer 的排列方式

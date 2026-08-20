@@ -63,6 +63,7 @@ class PokemonCandidate:
     instance_id: str | None = None
     recommended_fast_move: Move | None = None
     recommended_charged_moves: tuple[Move, ...] = ()
+    moves_provisional: bool = False
 
     @property
     def name(self) -> str:
@@ -102,6 +103,7 @@ class InventoryPokemon:
     charged_move_1: str | None
     charged_move_2: str | None
     notes: str = ""
+    declared_move_state: str | None = None
 
     @property
     def move_names(self) -> tuple[str, ...]:

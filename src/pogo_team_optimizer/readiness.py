@@ -15,6 +15,8 @@ class ReadinessStatus(StrEnum):
     INELIGIBLE_OVER_CAP = "ineligible-over-cap"
     INVALID_MISSING_MOVE = "invalid/missing-move"
     MISSING_SPECIES_FORM = "missing-species/form"
+    NEEDS_MOVE_CHECK = "needs-move-check"
+    POWER_UP_AND_MOVE_CHECK = "power-up+move-check"
 
 
 class TargetCpSource(StrEnum):
@@ -80,4 +82,27 @@ def assess_readiness(
         readiness_ratio=ratio,
         status=status,
         target_source=source,
+    )
+
+
+def assess_unknown_moves_readiness(
+    actual_cp: int,
+    ranking_cp: int,
+    league_cp_cap: int,
+    config: ReadinessConfig = DEFAULT_READINESS_CONFIG,
+) -> ReadinessAssessment:
+    base = assess_readiness(actual_cp, ranking_cp, league_cp_cap, config)
+    if base.status is ReadinessStatus.READY_NOW:
+        status = ReadinessStatus.NEEDS_MOVE_CHECK
+    elif base.status is ReadinessStatus.POWER_UP_NEEDED:
+        status = ReadinessStatus.POWER_UP_AND_MOVE_CHECK
+    else:
+        status = base.status
+    return ReadinessAssessment(
+        base.actual_cp,
+        base.target_cp,
+        base.cp_gap,
+        base.readiness_ratio,
+        status,
+        base.target_source,
     )

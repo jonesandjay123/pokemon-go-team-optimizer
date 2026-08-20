@@ -1,0 +1,6 @@
+instance_id,pokemon_name,form,shadow,cp,fast_move,charged_move_1,charged_move_2,notes,move_state
+unknown-grass,妙蛙種子,,false,1490,,,,moves not checked yet,
+unknown-fire,小火龍,,false,900,,,,moves not checked and underpowered,unknown
+known-fire,小火龍,,false,1460,火花,蓄能焰襲,,actual moves documented,known
+known-water,傑尼龜,,false,1495,水槍,衝浪,冰凍光束,actual moves documented,known
+invalid-shadow,妙蛙種子,,true,1490,不存在的招式,種子炸彈,污泥炸彈,invalid named move cannot be masked,unknown
